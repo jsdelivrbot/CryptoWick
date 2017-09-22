@@ -3,6 +3,23 @@ import "./App.css";
 
 //const logo = require("./logo.svg");
 
+function sendTextWithTwilio(accountSid: string, authToken: string, fromPhoneNumber: string, toPhoneNumber: string, message: string) {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages`;
+
+  let postBody = new FormData();
+  postBody.append("From", fromPhoneNumber);
+  postBody.append("To", toPhoneNumber);
+  postBody.append("Body", message);
+
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${btoa(accountSid + ":" + authToken)}`
+    },
+    body: postBody
+  });
+}
+
 class Vector2 {
   constructor(public x: number, public y: number) {}
 }
@@ -28,8 +45,15 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 
   columnWidth = 15;
   columnHorizontalPadding = 1;
-  minPrice = 3500;
-  maxPrice = 4000;
+
+  get minPrice(): number {
+    if (!this.props.candlesticks) { return 0; }
+    return Math.min(...this.props.candlesticks.lows);
+  }
+  get maxPrice(): number {
+    if (!this.props.candlesticks) { return 0; }
+    return Math.max(...this.props.candlesticks.highs);
+  }
 
   priceToY(price: number) {
     const priceRange = this.maxPrice - this.minPrice;
@@ -101,28 +125,93 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 }
 
 interface AppState {
-  candlesticks: any
+  candlesticks: any,
+  twilioAccountSid: string,
+  twilioAuthToken: string,
+  fromPhoneNumber: string,
+  toPhoneNumber: string
 }
 
 class App extends React.Component<{}, AppState> {
+  refreshCandlesticksIntervalHandle: number;
+  refreshIntervalSeconds = 30;
+
   constructor() {
     super();
 
     this.state = {
-      candlesticks: null
+      candlesticks: null,
+      twilioAccountSid: "",
+      twilioAuthToken: "",
+      fromPhoneNumber: "+1",
+      toPhoneNumber: "+1"
     };
   }
-  componentDidMount() {
+
+  onTwilioAccountSidChange(event: any) {
+    this.setState({ twilioAccountSid: event.target.value });
+  }
+  onTwilioAuthTokenChange(event: any) {
+    this.setState({ twilioAuthToken: event.target.value });
+  }
+  onFromPhoneNumberChange(event: any) {
+    this.setState({ fromPhoneNumber: event.target.value });
+  }
+  onToPhoneNumberChange(event: any) {
+    this.setState({ toPhoneNumber: event.target.value });
+  }
+  onSendTestTextClick(event: any) {
+    sendTextWithTwilio(
+      this.state.twilioAccountSid, this.state.twilioAuthToken,
+      this.state.fromPhoneNumber, this.state.toPhoneNumber,
+      "Text from CryptoWick!"
+    );
+  }
+
+  reloadCandlesticks() {
     loadBtcUsd15MinGeminiCandleSticks()
-      .then(candlesticks => {
-        this.setState({
-          candlesticks: candlesticks
-        });
+    .then(candlesticks => {
+      this.setState({
+        candlesticks: candlesticks
       });
+    });
+  }
+
+  componentDidMount() {
+    this.reloadCandlesticks();
+
+    this.refreshCandlesticksIntervalHandle = setInterval(
+      this.reloadCandlesticks.bind(this),
+      1000 * this.refreshIntervalSeconds
+    );
+  }
+  componentWillUnmount() {
+    clearInterval(this.refreshCandlesticksIntervalHandle);
   }
   render() {
+    const onTwilioAccountSidChange = this.onTwilioAccountSidChange.bind(this);
+    const onTwilioAuthTokenChange = this.onTwilioAuthTokenChange.bind(this);
+    const onFromPhoneNumberChange = this.onFromPhoneNumberChange.bind(this);
+    const onToPhoneNumberChange = this.onToPhoneNumberChange.bind(this);
+    const onSendTestTextClick = this.onSendTestTextClick.bind(this);
+
     return (
       <div className="App">
+        <div>
+          Twilio Account SID
+          <input type="text" value={this.state.twilioAccountSid} onChange={onTwilioAccountSidChange} />
+
+          Twilio Auth Token
+          <input type="text" value={this.state.twilioAuthToken} onChange={onTwilioAuthTokenChange} />
+
+          From
+          <input type="text" value={this.state.fromPhoneNumber} onChange={onFromPhoneNumberChange} />
+
+          To
+          <input type="text" value={this.state.toPhoneNumber} onChange={onToPhoneNumberChange} />
+
+          <button onClick={onSendTestTextClick}>Send Test Text</button>
+        </div>
         <CandleStickChart candlesticks={this.state.candlesticks} />
       </div>
     );
