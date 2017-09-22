@@ -65,6 +65,8 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   drawToCanvas() {
     if (this.context2d === null) { return; }
 
+    this.context2d.clearRect(0, 0, this.width, this.height);
+
     if (this.props.candlesticks) {
       const rightmostColumnX = this.width - this.columnWidth;
       const rightmostCandlestickIndex = this.props.candlesticks.count - 1;
