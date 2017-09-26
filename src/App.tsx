@@ -29,6 +29,18 @@ class Vector2 {
   constructor(public x: number, public y: number) {}
 }
 
+class TradeAnalysis {
+  openTimes: number[];
+  opens: number[];
+  highs: number[];
+  lows: number[];
+  closes: number[];
+
+  get candlestickCount() {
+    return this.opens.length;
+  }
+}
+
 class Settings {
   constructor(
     public twilioAccountSid: string,
@@ -56,7 +68,7 @@ function fillRect(
 }
 
 interface CandlestickChartProps {
-  candlesticks: any
+  tradeAnalysis: any
 }
 class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
@@ -69,12 +81,12 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   columnHorizontalPadding = 1;
 
   get minPrice(): number {
-    if (!this.props.candlesticks) { return 0; }
-    return Math.min(...this.props.candlesticks.lows);
+    if (!this.props.tradeAnalysis) { return 0; }
+    return Math.min(...this.props.tradeAnalysis.lows);
   }
   get maxPrice(): number {
-    if (!this.props.candlesticks) { return 0; }
-    return Math.max(...this.props.candlesticks.highs);
+    if (!this.props.tradeAnalysis) { return 0; }
+    return Math.max(...this.props.tradeAnalysis.highs);
   }
 
   priceToY(price: number) {
@@ -89,20 +101,20 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 
     this.context2d.clearRect(0, 0, this.width, this.height);
 
-    if (this.props.candlesticks) {
+    if (this.props.tradeAnalysis) {
       const rightmostColumnX = this.width - this.columnWidth;
-      const rightmostCandlestickIndex = this.props.candlesticks.count - 1;
+      const rightmostCandlestickIndex = this.props.tradeAnalysis.candlestickCount - 1;
   
-      const candlesticks = this.props.candlesticks;
-      for (let iFromRight = 0; iFromRight < candlesticks.count; iFromRight++) {
+      const tradeAnalysis = this.props.tradeAnalysis;
+      for (let iFromRight = 0; iFromRight < tradeAnalysis.candlestickCount; iFromRight++) {
         const i = rightmostCandlestickIndex - iFromRight;
 
         const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
 
-        const open = candlesticks.opens[i];
-        const high = candlesticks.highs[i];
-        const low = candlesticks.lows[i];
-        const close = candlesticks.closes[i];
+        const open = tradeAnalysis.opens[i];
+        const high = tradeAnalysis.highs[i];
+        const low = tradeAnalysis.lows[i];
+        const close = tradeAnalysis.closes[i];
 
         const fillStyle = (close > open) ? "green" : "red";
 
@@ -149,7 +161,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 }
 
 interface AppState {
-  candlesticks: any,
+  tradeAnalysis: any,
   twilioAccountSid: string,
   twilioAuthToken: string,
   fromPhoneNumber: string,
@@ -164,7 +176,7 @@ class App extends React.Component<{}, AppState> {
     super();
 
     this.state = {
-      candlesticks: null,
+      tradeAnalysis: null,
       twilioAccountSid: "",
       twilioAuthToken: "",
       fromPhoneNumber: "+1",
@@ -204,9 +216,9 @@ class App extends React.Component<{}, AppState> {
 
   reloadCandlesticks() {
     loadBtcUsd15MinGeminiCandleSticks()
-    .then(candlesticks => {
+    .then(tradeAnalysis => {
       this.setState({
-        candlesticks: candlesticks
+        tradeAnalysis: tradeAnalysis
       });
     });
   }
@@ -258,7 +270,7 @@ class App extends React.Component<{}, AppState> {
           <button onClick={onSaveSettings}>Save Settings</button>
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
-        <CandleStickChart candlesticks={this.state.candlesticks} />
+        <CandleStickChart tradeAnalysis={this.state.tradeAnalysis} />
       </div>
     );
   }
@@ -267,7 +279,7 @@ class App extends React.Component<{}, AppState> {
 export default App;
 
 // initialization
-function loadBtcUsd15MinGeminiCandleSticks(): Promise<any> {
+function loadBtcUsd15MinGeminiCandleSticks(): Promise<TradeAnalysis> {
   return fetch("https://min-api.cryptocompare.com/data/histominute?fsym=BTC&tsym=USD&aggregate=15&e=Gemini")
     .then(response => {
       if (!response.ok) {
@@ -282,27 +294,22 @@ function loadBtcUsd15MinGeminiCandleSticks(): Promise<any> {
       }
 
       const candlestickCount: number = json.Data.length;
-      let times = new Array(candlestickCount);
-      let opens = new Array(candlestickCount);
-      let highs = new Array(candlestickCount);
-      let lows = new Array(candlestickCount);
-      let closes = new Array(candlestickCount);
+      
+      let tradeAnalysis = new TradeAnalysis();
+      tradeAnalysis.openTimes = new Array(candlestickCount);
+      tradeAnalysis.opens = new Array(candlestickCount);
+      tradeAnalysis.highs = new Array(candlestickCount);
+      tradeAnalysis.lows = new Array(candlestickCount);
+      tradeAnalysis.closes = new Array(candlestickCount);
 
       for (let i = 0; i < json.Data.length; i++) {
-        times[i] = json.Data[i].time;
-        opens[i] = json.Data[i].open;
-        highs[i] = json.Data[i].high;
-        lows[i] = json.Data[i].low;
-        closes[i] = json.Data[i].close;
+        tradeAnalysis.openTimes[i] = json.Data[i].time;
+        tradeAnalysis.opens[i] = json.Data[i].open;
+        tradeAnalysis.highs[i] = json.Data[i].high;
+        tradeAnalysis.lows[i] = json.Data[i].low;
+        tradeAnalysis.closes[i] = json.Data[i].close;
       }
 
-      return {
-        count: candlestickCount,
-        times: times,
-        opens: opens,
-        highs: highs,
-        lows: lows,
-        closes: closes
-      };
+      return tradeAnalysis;
     });
 }
