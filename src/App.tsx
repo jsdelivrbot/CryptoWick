@@ -3,7 +3,12 @@ import "./App.css";
 
 //const logo = require("./logo.svg");
 
-function sendTextWithTwilio(accountSid: string, authToken: string, fromPhoneNumber: string, toPhoneNumber: string, message: string) {
+function sendTextWithTwilio(
+  accountSid: string,
+  authToken: string,
+  fromPhoneNumber: string,
+  toPhoneNumber: string,
+  message: string) {
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages`;
 
   let postBody = new FormData();
@@ -22,6 +27,23 @@ function sendTextWithTwilio(accountSid: string, authToken: string, fromPhoneNumb
 
 class Vector2 {
   constructor(public x: number, public y: number) {}
+}
+
+class Settings {
+  constructor(
+    public twilioAccountSid: string,
+    public twilioAuthToken: string,
+    public fromPhoneNumber: string,
+    public toPhoneNumber: string) {}
+}
+const SETTINGS_STORAGE_KEY = "settings";
+function saveSettings(settings: Settings) {
+  localStorage.setItem("settings", JSON.stringify(settings));
+}
+function loadSettings(): Settings | null {
+  const settingsJson = localStorage.getItem("settings");
+
+  return settingsJson ? JSON.parse(settingsJson) : null;
 }
 
 function fillRect(
@@ -162,6 +184,16 @@ class App extends React.Component<{}, AppState> {
   onToPhoneNumberChange(event: any) {
     this.setState({ toPhoneNumber: event.target.value });
   }
+
+  onSaveSettings(event: any) {
+    const settings = new Settings(
+      this.state.twilioAccountSid,
+      this.state.twilioAuthToken,
+      this.state.fromPhoneNumber,
+      this.state.toPhoneNumber);
+    
+    saveSettings(settings);
+  }
   onSendTestTextClick(event: any) {
     sendTextWithTwilio(
       this.state.twilioAccountSid, this.state.twilioAuthToken,
@@ -180,6 +212,16 @@ class App extends React.Component<{}, AppState> {
   }
 
   componentDidMount() {
+    const settings = loadSettings();
+    if (settings) {
+      this.setState({
+        twilioAccountSid: settings.twilioAccountSid,
+        twilioAuthToken: settings.twilioAuthToken,
+        fromPhoneNumber: settings.fromPhoneNumber,
+        toPhoneNumber: settings.toPhoneNumber
+      });
+    }
+
     this.reloadCandlesticks();
 
     this.refreshCandlesticksIntervalHandle = setInterval(
@@ -195,6 +237,7 @@ class App extends React.Component<{}, AppState> {
     const onTwilioAuthTokenChange = this.onTwilioAuthTokenChange.bind(this);
     const onFromPhoneNumberChange = this.onFromPhoneNumberChange.bind(this);
     const onToPhoneNumberChange = this.onToPhoneNumberChange.bind(this);
+    const onSaveSettings = this.onSaveSettings.bind(this);
     const onSendTestTextClick = this.onSendTestTextClick.bind(this);
 
     return (
@@ -212,6 +255,7 @@ class App extends React.Component<{}, AppState> {
           To
           <input type="text" value={this.state.toPhoneNumber} onChange={onToPhoneNumberChange} />
 
+          <button onClick={onSaveSettings}>Save Settings</button>
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
         <CandleStickChart candlesticks={this.state.candlesticks} />
