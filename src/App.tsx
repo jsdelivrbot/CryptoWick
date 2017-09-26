@@ -35,9 +35,17 @@ class TradeAnalysis {
   highs: number[];
   lows: number[];
   closes: number[];
+  isGreens: boolean[];
 
   get candlestickCount() {
     return this.opens.length;
+  }
+  analyze() {
+    this.isGreens = new Array(this.candlestickCount);
+
+    for(let i = 0; i < this.candlestickCount; i++) {
+      this.isGreens[i] = this.closes[i] > this.opens[i];
+    }
   }
 }
 
@@ -66,6 +74,17 @@ function fillRect(
     context2d.fillStyle = fillStyle;
     context2d.fillRect(position.x, position.y, width, height);
 }
+function fillCircle(
+  context2d: CanvasRenderingContext2D,
+  position: Vector2,
+  radius: number,
+  fillStyle: string) {
+    context2d.beginPath();
+    context2d.arc(position.x, position.y, radius, 0, 2 * Math.PI);
+
+    context2d.fillStyle = fillStyle;
+    context2d.fill();
+}
 
 interface CandlestickChartProps {
   tradeAnalysis: any
@@ -79,6 +98,8 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 
   columnWidth = 15;
   columnHorizontalPadding = 1;
+
+  markerVerticalMargin = 5;
 
   get minPrice(): number {
     if (!this.props.tradeAnalysis) { return 0; }
@@ -102,6 +123,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
     this.context2d.clearRect(0, 0, this.width, this.height);
 
     if (this.props.tradeAnalysis) {
+      // draw candlesticks
       const rightmostColumnX = this.width - this.columnWidth;
       const rightmostCandlestickIndex = this.props.tradeAnalysis.candlestickCount - 1;
   
@@ -137,6 +159,24 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         
         // wick
         fillRect(this.context2d, new Vector2(wickLeft, wickTop), 1, wickHeight, fillStyle);
+      }
+
+      // draw boolean indicators
+      for (let iFromRight = 0; iFromRight < tradeAnalysis.candlestickCount; iFromRight++) {
+        const i = rightmostCandlestickIndex - iFromRight;
+        const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+        const low = tradeAnalysis.lows[i];
+        const fillStyle = "black";
+        const wickBottom = this.priceToY(low);
+
+        if (tradeAnalysis.isGreens[i]) {
+          const radius = (this.columnWidth / 2) - this.columnHorizontalPadding;
+          const circlePos = new Vector2(
+            columnX + (this.columnWidth / 2),
+            wickBottom + radius + this.markerVerticalMargin);
+            
+          fillCircle(this.context2d, circlePos, radius, fillStyle);
+        }
       }
     }
   }
@@ -310,6 +350,7 @@ function loadBtcUsd15MinGeminiCandleSticks(): Promise<TradeAnalysis> {
         tradeAnalysis.closes[i] = json.Data[i].close;
       }
 
+      tradeAnalysis.analyze();
       return tradeAnalysis;
     });
 }
