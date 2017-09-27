@@ -3,6 +3,12 @@ import "./App.css";
 
 //const logo = require("./logo.svg");
 
+function assert(condition: boolean) {
+  if (!condition) {
+    throw new Error(`Failed assertion.`);
+  }
+}
+
 function sendTextWithTwilio(
   accountSid: string,
   authToken: string,
@@ -35,18 +41,91 @@ class TradeAnalysis {
   highs: number[];
   lows: number[];
   closes: number[];
+  volumes: number[];
   isGreens: boolean[];
+  isReds: boolean[];
+
+  constructor(
+    openTimes: number[],
+    opens: number[],
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    volumes: number[]) {
+      this.openTimes = openTimes;
+      this.opens = opens;
+      this.highs = highs;
+      this.lows = lows;
+      this.closes = closes;
+      this.volumes = volumes;
+
+      //this.isGreens = areConsecutiveBullishCandlesticks(4, this.opens, this.closes);
+      this.isGreens = areLocalMinima(2, this.lows);
+      this.isReds = areLocalMaxima(2, this.highs);
+  }
 
   get candlestickCount() {
     return this.opens.length;
   }
-  analyze() {
-    this.isGreens = new Array(this.candlestickCount);
+}
 
-    for(let i = 0; i < this.candlestickCount; i++) {
-      this.isGreens[i] = this.closes[i] > this.opens[i];
+function arraySliceAll<T>(predicate: (x: T) => boolean, array: T[], sliceStartIndex: number, sliceLength: number) {
+  assert(sliceStartIndex >= 0);
+  assert((sliceStartIndex + sliceLength) <= array.length);
+
+  for (let i = sliceStartIndex; i < (sliceStartIndex + sliceLength); i++) {
+    if (!predicate(array[i])) {
+      return false;
     }
   }
+
+  return true;
+}
+
+function areConsecutiveBullishCandlesticks(windowSize: number, opens: number[], closes: number[]): boolean[] {
+  assert(windowSize >= 1);
+  assert(opens.length === closes.length);
+
+  const candlestickCount = opens.length;
+  let result = new Array(candlestickCount);
+
+  for (let curI = 0; curI < candlestickCount; curI++) {
+    if (curI < (windowSize - 1)) {
+      result[curI] = false;
+      continue;
+    }
+
+    result[curI] = true;
+
+    for (let pastI = (curI - (windowSize - 1)); pastI <= curI; pastI++) {
+      if (closes[pastI] <= opens[pastI]) {
+        result[curI] = false;
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+function areLocalMinima(candlestickRadius: number, lows: number[]): boolean[] {
+  assert(candlestickRadius >= 1);
+
+  const windowSize = (2 * candlestickRadius) + 1;
+  const maxIndex = lows.length - 1;
+  return lows.map((low, index) => ((index >= candlestickRadius) && (index <= (maxIndex - candlestickRadius)))
+    ? arraySliceAll(otherLow => (otherLow >= low), lows, index - candlestickRadius, windowSize)
+    : false
+  );
+}
+function areLocalMaxima(candlestickRadius: number, highs: number[]): boolean[] {
+  assert(candlestickRadius >= 1);
+
+  const windowSize = (2 * candlestickRadius) + 1;
+  const maxIndex = highs.length - 1;
+  return highs.map((high, index) => ((index >= candlestickRadius) && (index <= (maxIndex - candlestickRadius)))
+    ? arraySliceAll(otherHigh => (otherHigh <= high), highs, index - candlestickRadius, windowSize)
+    : false
+  );
 }
 
 class Settings {
@@ -87,7 +166,7 @@ function fillCircle(
 }
 
 interface CandlestickChartProps {
-  tradeAnalysis: any
+  tradeAnalysis: TradeAnalysis | null;
 }
 class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
@@ -165,17 +244,26 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
       for (let iFromRight = 0; iFromRight < tradeAnalysis.candlestickCount; iFromRight++) {
         const i = rightmostCandlestickIndex - iFromRight;
         const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+
+        const high = tradeAnalysis.highs[i];
+        const wickTop = this.priceToY(high);
+
         const low = tradeAnalysis.lows[i];
-        const fillStyle = "black";
         const wickBottom = this.priceToY(low);
 
+        const circleRadius = (this.columnWidth / 2) - this.columnHorizontalPadding;
+        const circleX = columnX + (this.columnWidth / 2);
+        const circleYMarginFromWick = circleRadius + this.markerVerticalMargin;
+        const fillStyle = "black";
+        
         if (tradeAnalysis.isGreens[i]) {
-          const radius = (this.columnWidth / 2) - this.columnHorizontalPadding;
-          const circlePos = new Vector2(
-            columnX + (this.columnWidth / 2),
-            wickBottom + radius + this.markerVerticalMargin);
-            
-          fillCircle(this.context2d, circlePos, radius, fillStyle);
+          const circlePos = new Vector2(circleX, wickBottom + circleYMarginFromWick);
+          fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
+        }
+
+        if (tradeAnalysis.isReds[i]) {
+          const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
+          fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
       }
     }
@@ -201,11 +289,11 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 }
 
 interface AppState {
-  tradeAnalysis: any,
-  twilioAccountSid: string,
-  twilioAuthToken: string,
-  fromPhoneNumber: string,
-  toPhoneNumber: string
+  tradeAnalysis: TradeAnalysis | null;
+  twilioAccountSid: string;
+  twilioAuthToken: string;
+  fromPhoneNumber: string;
+  toPhoneNumber: string;
 }
 
 class App extends React.Component<{}, AppState> {
@@ -257,9 +345,29 @@ class App extends React.Component<{}, AppState> {
   reloadCandlesticks() {
     loadBtcUsd15MinGeminiCandleSticks()
     .then(tradeAnalysis => {
-      this.setState({
-        tradeAnalysis: tradeAnalysis
-      });
+      const lastOpenTime = this.state.tradeAnalysis
+        ? this.state.tradeAnalysis.openTimes[this.state.tradeAnalysis.candlestickCount - 1]
+        : null;
+      const mostRecentOpenTime = tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1];
+
+      const isNewAnalysis = !lastOpenTime || (mostRecentOpenTime > lastOpenTime);
+
+      if (isNewAnalysis) {
+        this.setState({
+          tradeAnalysis: tradeAnalysis
+        });
+
+        const isEntrySignal = tradeAnalysis.isGreens[tradeAnalysis.candlestickCount - 1];
+        if (isEntrySignal && this.state.twilioAccountSid) {
+          sendTextWithTwilio(
+            this.state.twilioAccountSid,
+            this.state.twilioAuthToken,
+            this.state.fromPhoneNumber,
+            this.state.toPhoneNumber,
+            "Entry signal."
+          );
+        }
+      }
     });
   }
 
@@ -335,22 +443,22 @@ function loadBtcUsd15MinGeminiCandleSticks(): Promise<TradeAnalysis> {
 
       const candlestickCount: number = json.Data.length;
       
-      let tradeAnalysis = new TradeAnalysis();
-      tradeAnalysis.openTimes = new Array(candlestickCount);
-      tradeAnalysis.opens = new Array(candlestickCount);
-      tradeAnalysis.highs = new Array(candlestickCount);
-      tradeAnalysis.lows = new Array(candlestickCount);
-      tradeAnalysis.closes = new Array(candlestickCount);
+      let openTimes = new Array(candlestickCount);
+      let opens = new Array(candlestickCount);
+      let highs = new Array(candlestickCount);
+      let lows = new Array(candlestickCount);
+      let closes = new Array(candlestickCount);
+      let volumes = new Array(candlestickCount);
 
       for (let i = 0; i < json.Data.length; i++) {
-        tradeAnalysis.openTimes[i] = json.Data[i].time;
-        tradeAnalysis.opens[i] = json.Data[i].open;
-        tradeAnalysis.highs[i] = json.Data[i].high;
-        tradeAnalysis.lows[i] = json.Data[i].low;
-        tradeAnalysis.closes[i] = json.Data[i].close;
+        openTimes[i] = json.Data[i].time;
+        opens[i] = json.Data[i].open;
+        highs[i] = json.Data[i].high;
+        lows[i] = json.Data[i].low;
+        closes[i] = json.Data[i].close;
+        volumes[i] = json.Data[i].volumefrom;
       }
 
-      tradeAnalysis.analyze();
-      return tradeAnalysis;
+      return new TradeAnalysis(openTimes, opens, highs, lows, closes, volumes);
     });
 }
