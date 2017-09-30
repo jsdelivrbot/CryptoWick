@@ -189,12 +189,59 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
     return Math.max(...this.props.tradeAnalysis.highs);
   }
 
-  priceToY(price: number) {
+  iFromRightToI(iFromRight: number): number {
+    if(!this.props.tradeAnalysis) { return 0; }
+    
+    const rightmostCandlestickIndex = this.props.tradeAnalysis.candlestickCount - 1;
+    const i = rightmostCandlestickIndex - iFromRight;
+
+    return i;
+  }
+  iFromRightToColumnX(iFromRight: number): number {
+    const rightmostColumnX = this.width - this.columnWidth;
+    const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+
+    return columnX;
+  }
+  priceToY(price: number): number {
     const priceRange = this.maxPrice - this.minPrice;
     const yPercentFromBottom = (price - this.minPrice) / priceRange;
     const yFromBottom = yPercentFromBottom * this.height;
     const yFromTop = this.height - yFromBottom;
     return yFromTop;
+  }
+  drawCandlestick(iFromRight: number) {
+    if(!this.props.tradeAnalysis || !this.context2d) { return; }
+    
+    const i = this.iFromRightToI(iFromRight);
+    const columnX = this.iFromRightToColumnX(iFromRight);
+
+    const open = this.props.tradeAnalysis.opens[i];
+    const high = this.props.tradeAnalysis.highs[i];
+    const low = this.props.tradeAnalysis.lows[i];
+    const close = this.props.tradeAnalysis.closes[i];
+
+    const fillStyle = (close > open) ? "green" : "red";
+
+    const bodyLeft = columnX + this.columnHorizontalPadding;
+    const bodyRight = (columnX + this.columnWidth) - this.columnHorizontalPadding;
+    const bodyWidth = bodyRight - bodyLeft;
+    const bodyMaxPrice = Math.max(open, close);
+    const bodyMinPrice = Math.min(open, close);
+    const bodyTop = this.priceToY(bodyMaxPrice);
+    const bodyBottom = this.priceToY(bodyMinPrice);
+    const bodyHeight = bodyBottom - bodyTop;
+
+    const wickLeft = columnX + (this.columnWidth / 2);
+    const wickTop = this.priceToY(high);
+    const wickBottom = this.priceToY(low);
+    const wickHeight = wickBottom - wickTop;
+
+    // body
+    fillRect(this.context2d, new Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
+    
+    // wick
+    fillRect(this.context2d, new Vector2(wickLeft, wickTop), 1, wickHeight, fillStyle);
   }
   drawToCanvas() {
     if (this.context2d === null) { return; }
@@ -203,52 +250,19 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 
     if (this.props.tradeAnalysis) {
       // draw candlesticks
-      const rightmostColumnX = this.width - this.columnWidth;
-      const rightmostCandlestickIndex = this.props.tradeAnalysis.candlestickCount - 1;
-  
-      const tradeAnalysis = this.props.tradeAnalysis;
-      for (let iFromRight = 0; iFromRight < tradeAnalysis.candlestickCount; iFromRight++) {
-        const i = rightmostCandlestickIndex - iFromRight;
-
-        const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
-
-        const open = tradeAnalysis.opens[i];
-        const high = tradeAnalysis.highs[i];
-        const low = tradeAnalysis.lows[i];
-        const close = tradeAnalysis.closes[i];
-
-        const fillStyle = (close > open) ? "green" : "red";
-
-        const bodyLeft = columnX + this.columnHorizontalPadding;
-        const bodyRight = (columnX + this.columnWidth) - this.columnHorizontalPadding;
-        const bodyWidth = bodyRight - bodyLeft;
-        const bodyMaxPrice = Math.max(open, close);
-        const bodyMinPrice = Math.min(open, close);
-        const bodyTop = this.priceToY(bodyMaxPrice);
-        const bodyBottom = this.priceToY(bodyMinPrice);
-        const bodyHeight = bodyBottom - bodyTop;
-
-        const wickLeft = columnX + (this.columnWidth / 2);
-        const wickTop = this.priceToY(high);
-        const wickBottom = this.priceToY(low);
-        const wickHeight = wickBottom - wickTop;
-
-        // body
-        fillRect(this.context2d, new Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
-        
-        // wick
-        fillRect(this.context2d, new Vector2(wickLeft, wickTop), 1, wickHeight, fillStyle);
+      for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
+        this.drawCandlestick(iFromRight);
       }
 
       // draw boolean indicators
-      for (let iFromRight = 0; iFromRight < tradeAnalysis.candlestickCount; iFromRight++) {
-        const i = rightmostCandlestickIndex - iFromRight;
-        const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+      for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
+        const i = this.iFromRightToI(iFromRight);
+        const columnX = this.iFromRightToColumnX(iFromRight);
 
-        const high = tradeAnalysis.highs[i];
+        const high = this.props.tradeAnalysis.highs[i];
         const wickTop = this.priceToY(high);
 
-        const low = tradeAnalysis.lows[i];
+        const low = this.props.tradeAnalysis.lows[i];
         const wickBottom = this.priceToY(low);
 
         const circleRadius = (this.columnWidth / 2) - this.columnHorizontalPadding;
@@ -256,12 +270,12 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         const circleYMarginFromWick = circleRadius + this.markerVerticalMargin;
         const fillStyle = "black";
         
-        if (tradeAnalysis.isGreens[i]) {
+        if (this.props.tradeAnalysis.isGreens[i]) {
           const circlePos = new Vector2(circleX, wickBottom + circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
 
-        if (tradeAnalysis.isReds[i]) {
+        if (this.props.tradeAnalysis.isReds[i]) {
           const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
@@ -308,7 +322,7 @@ class VolumeChart extends React.Component<VolumeChartProps, {}> {
     return Math.max(...this.props.tradeAnalysis.volumes);
   }
 
-  volumeToY(price: number) {
+  volumeToY(price: number): number {
     const yPercentFromBottom = price / this.maxVolume;
     const yFromBottom = yPercentFromBottom * this.height;
     const yFromTop = this.height - yFromBottom;
