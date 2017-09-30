@@ -45,8 +45,10 @@ class TradeAnalysis {
   lows: number[];
   closes: number[];
   volumes: number[];
-  isGreens: boolean[];
-  isReds: boolean[];
+
+  isLocalMinima: boolean[];
+  isLocalMaxima: boolean[];
+  lineOfBestFitPercentCloseSlopes: number[];
 
   constructor(
     securitySymbol: string,
@@ -69,8 +71,9 @@ class TradeAnalysis {
       this.volumes = volumes;
 
       //this.isGreens = areConsecutiveBullishCandlesticks(4, this.opens, this.closes);
-      this.isGreens = areLocalMinima(2, this.lows);
-      this.isReds = areLocalMaxima(2, this.highs);
+      this.isLocalMinima = areLocalMinima(2, this.lows);
+      this.isLocalMaxima = areLocalMaxima(2, this.highs);
+      this.lineOfBestFitPercentCloseSlopes = lineOfBestFitPercentCloseSlopes(this.closes, 4);
   }
 
   get candlestickCount() {
@@ -173,6 +176,30 @@ function fillCircle(
     context2d.fillStyle = fillStyle;
     context2d.fill();
 }
+function strokeLine(context2d: CanvasRenderingContext2D, p1: Vector2, p2: Vector2, strokeStyle: string) {
+  context2d.strokeStyle = strokeStyle;
+  context2d.beginPath();
+  context2d.moveTo(p1.x, p1.y);
+  context2d.lineTo(p2.x, p2.y);
+  context2d.stroke();
+}
+function strokePolyline(context2d: CanvasRenderingContext2D, points: Vector2[], strokeStyle: string) {
+  if(points.length === 0) { return; }
+  
+  context2d.strokeStyle = strokeStyle;
+  context2d.beginPath();
+
+  for(let i = 0; i < points.length; i++) {
+    const point = points[i];
+    if(i > 0) {
+      context2d.lineTo(point.x, point.y);
+    } else {
+      context2d.moveTo(point.x, point.y);
+    }
+  }
+
+  context2d.stroke();
+}
 
 interface CandlestickChartProps {
   tradeAnalysis: TradeAnalysis | null;
@@ -182,7 +209,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   context2d: CanvasRenderingContext2D | null;
 
   width = 800;
-  height = 400;
+  height = 300;
 
   columnWidth = 15;
   columnHorizontalPadding = 1;
@@ -279,12 +306,12 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         const circleYMarginFromWick = circleRadius + this.markerVerticalMargin;
         const fillStyle = "black";
         
-        if (this.props.tradeAnalysis.isGreens[i]) {
+        if (this.props.tradeAnalysis.isLocalMinima[i]) {
           const circlePos = new Vector2(circleX, wickBottom + circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
 
-        if (this.props.tradeAnalysis.isReds[i]) {
+        if (this.props.tradeAnalysis.isLocalMaxima[i]) {
           const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
@@ -331,8 +358,8 @@ class VolumeChart extends React.Component<VolumeChartProps, {}> {
     return Math.max(...this.props.tradeAnalysis.volumes);
   }
 
-  volumeToY(price: number): number {
-    const yPercentFromBottom = price / this.maxVolume;
+  volumeToY(volume: number): number {
+    const yPercentFromBottom = volume / this.maxVolume;
     const yFromBottom = yPercentFromBottom * this.height;
     const yFromTop = this.height - yFromBottom;
     return yFromTop;
@@ -389,6 +416,137 @@ class VolumeChart extends React.Component<VolumeChartProps, {}> {
   render() {
     return <canvas ref={domElement => this.canvasElement = domElement} width={this.width} height={this.height} />;
   }
+}
+
+interface LineChartProps {
+  values: number[];
+}
+class LineChart extends React.Component<LineChartProps, {}> {
+  canvasElement: HTMLCanvasElement | null;
+  context2d: CanvasRenderingContext2D | null;
+
+  width = 800;
+  height = 100;
+
+  columnWidth = 15;
+  columnHorizontalPadding = 1;
+
+  markerVerticalMargin = 5;
+
+  valueToY(value: number): number {
+    const maxAbsValue = Math.max(...this.props.values.map(Math.abs));
+    const minValue = -maxAbsValue;
+    const maxValue = maxAbsValue;
+
+    const valueRange = maxValue - minValue;
+    const yPercentFromBottom = (value - minValue) / valueRange;
+    const yFromBottom = yPercentFromBottom * this.height;
+    const yFromTop = this.height - yFromBottom;
+
+    return yFromTop;
+  }
+  getPolyline(): Vector2[] {
+    const rightmostColumnX = this.width - this.columnWidth;
+    const rightmostCandlestickIndex = this.props.values.length - 1;
+
+    let points = new Array<Vector2>(this.props.values.length);
+
+    for (let iFromRight = 0; iFromRight < points.length; iFromRight++) {
+      const i = rightmostCandlestickIndex - iFromRight;
+      const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+      const value = this.props.values[i];
+
+      const point = new Vector2(columnX + (this.columnWidth / 2), this.valueToY(value));
+      points[i] = point;
+    }
+
+    return points;
+  }
+  drawToCanvas() {
+    if (this.context2d === null) { return; }
+
+    this.context2d.clearRect(0, 0, this.width, this.height);
+
+    // draw x-axis
+    const xAxisY = this.valueToY(0);
+    strokeLine(this.context2d, new Vector2(0, xAxisY), new Vector2(this.width, xAxisY), "rgb(0, 0, 0)");
+
+    const polyline = this.getPolyline();
+    strokePolyline(this.context2d, polyline, "rgb(0, 0, 0)");
+  }
+
+  componentDidMount() {
+    if (this.canvasElement === null) { return; }
+
+    this.context2d = this.canvasElement.getContext("2d");
+    if (this.context2d === null) { return; }
+
+    this.drawToCanvas();
+  }
+  componentDidUpdate(prevProps: LineChartProps, prevState: {}) {
+    if (this.context2d === null) { return; }
+    
+    this.drawToCanvas();
+  }
+
+  render() {
+    return <canvas ref={domElement => this.canvasElement = domElement} width={this.width} height={this.height} />;
+  }
+}
+
+class LinearLeastSquaresResult {
+  m: number;
+  b: number;
+  r2: number;
+}
+function linearLeastSquares(points: Vector2[]): LinearLeastSquaresResult {
+  assert(points != null);
+  assert(points.length >= 2);
+
+  let Sx = 0;
+  for(let i = 0; i < points.length; i++) { Sx += points[i].x; }
+
+  let Sy = 0;
+  for (let i = 0; i < points.length; i++) { Sy += points[i].y; }
+
+  let Sxy = 0;
+  for (let i = 0; i < points.length; i++) { Sxy += (points[i].x * points[i].y); }
+
+  let Sxx = 0;
+  for (let i = 0; i < points.length; i++) { Sxx += (points[i].x * points[i].x); }
+
+  let Syy = 0;
+  for (let i = 0; i < points.length; i++) { Syy += (points[i].y * points[i].y); }
+
+  const SxSx = Sx * Sx;
+  const n = points.length;
+
+  let regressionLine = new LinearLeastSquaresResult();
+  let denominator = ((n * Sxx) - SxSx);
+  regressionLine.b = ((Sy * Sxx) - (Sx * Sxy)) / denominator;
+  regressionLine.m = ((n * Sxy) - (Sx * Sy)) / denominator;
+
+  const r = ((n * Sxy) - (Sx * Sy)) / (Math.sqrt(((n * Sxx) - (Sx * Sx))) * Math.sqrt(((n * Syy) - (Sy * Sy))));
+
+  regressionLine.r2 = r * r;
+
+  return regressionLine;
+}
+function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: number): number[] {
+  return closes.map((close, closeIndex) => {
+    const startCandlestickIndex = Math.max(closeIndex - (linRegCandleCount - 1), 0);
+    const pointCount = 1 + (closeIndex - startCandlestickIndex);
+
+    if(pointCount < 2) { return 0; }
+
+    let points = new Array<Vector2>(pointCount);
+
+    for(let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+      points[pointIndex] = new Vector2(pointIndex, closes[startCandlestickIndex + pointIndex]);
+    }
+
+    return linearLeastSquares(points).m / close;
+  });
 }
 
 interface AppState {
@@ -460,7 +618,7 @@ class App extends React.Component<{}, AppState> {
           tradeAnalysis: tradeAnalysis
         });
 
-        const isEntrySignal = tradeAnalysis.isGreens[tradeAnalysis.candlestickCount - 1];
+        const isEntrySignal = tradeAnalysis.isLocalMinima[tradeAnalysis.candlestickCount - 1];
         if (isEntrySignal && this.state.twilioAccountSid) {
           sendTextWithTwilio(
             this.state.twilioAccountSid,
@@ -529,6 +687,7 @@ class App extends React.Component<{}, AppState> {
         </div>
         <CandleStickChart tradeAnalysis={this.state.tradeAnalysis} />
         <VolumeChart tradeAnalysis={this.state.tradeAnalysis} />
+        {this.state.tradeAnalysis ? <LineChart values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes} /> : null}
       </div>
     );
   }
