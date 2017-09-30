@@ -49,6 +49,8 @@ class TradeAnalysis {
   isLocalMinima: boolean[];
   isLocalMaxima: boolean[];
   lineOfBestFitPercentCloseSlopes: number[];
+  lineOfBestFitPercentCloseSlopeConcavity: number[];
+  isBearish: boolean[];
 
   constructor(
     securitySymbol: string,
@@ -73,7 +75,20 @@ class TradeAnalysis {
       //this.isGreens = areConsecutiveBullishCandlesticks(4, this.opens, this.closes);
       this.isLocalMinima = areLocalMinima(2, this.lows);
       this.isLocalMaxima = areLocalMaxima(2, this.highs);
-      this.lineOfBestFitPercentCloseSlopes = lineOfBestFitPercentCloseSlopes(this.closes, 4);
+
+      this.lineOfBestFitPercentCloseSlopes = lineOfBestFitPercentCloseSlopes(this.closes, 8);
+      this.lineOfBestFitPercentCloseSlopeConcavity = movingSecondDerivative(
+        this.lineOfBestFitPercentCloseSlopes, 1
+      );
+
+      this.isBearish = new Array<boolean>(this.candlestickCount);
+      for(let i = 0; i < this.isBearish.length; i++) {
+        const isRed = this.closes[i] < this.opens[i];
+        const slopeIsNegative = this.lineOfBestFitPercentCloseSlopes[i] < 0;
+        const concaveDown = this.lineOfBestFitPercentCloseSlopeConcavity[i] < 0;
+
+        this.isBearish[i] = isRed && slopeIsNegative && concaveDown;
+      }
   }
 
   get candlestickCount() {
@@ -175,6 +190,10 @@ function fillCircle(
 
     context2d.fillStyle = fillStyle;
     context2d.fill();
+}
+function fillText(context2d: CanvasRenderingContext2D, text: string, position: Vector2, fillStyle: string) {
+  context2d.fillStyle = fillStyle;
+  context2d.fillText(text, position.x, position.y);
 }
 function strokeLine(context2d: CanvasRenderingContext2D, p1: Vector2, p2: Vector2, strokeStyle: string) {
   context2d.strokeStyle = strokeStyle;
@@ -306,7 +325,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         const circleYMarginFromWick = circleRadius + this.markerVerticalMargin;
         const fillStyle = "black";
         
-        if (this.props.tradeAnalysis.isLocalMinima[i]) {
+        /*if (this.props.tradeAnalysis.isLocalMinima[i]) {
           const circlePos = new Vector2(circleX, wickBottom + circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
@@ -314,8 +333,17 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         if (this.props.tradeAnalysis.isLocalMaxima[i]) {
           const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
+        }*/
+
+        if (this.props.tradeAnalysis.isBearish[i]) {
+          const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
+          fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
       }
+
+      // draw chart title
+      const chartTitle = `${this.props.tradeAnalysis.securitySymbol} ${this.props.tradeAnalysis.exchangeName} ${this.props.tradeAnalysis.timeframe}`;
+      fillText(this.context2d, chartTitle, new Vector2(10, 10), "rgb(0, 0, 0)");
     }
   }
 
@@ -537,7 +565,7 @@ function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: nu
     const startCandlestickIndex = Math.max(closeIndex - (linRegCandleCount - 1), 0);
     const pointCount = 1 + (closeIndex - startCandlestickIndex);
 
-    if(pointCount < 2) { return 0; }
+    if(pointCount < linRegCandleCount) { return 0; }
 
     let points = new Array<Vector2>(pointCount);
 
@@ -546,6 +574,48 @@ function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: nu
     }
 
     return linearLeastSquares(points).m / close;
+  });
+}
+
+function movingDerivative(values: number[], h: number): number[] {
+  assert(values !== null);
+  assert(h > 0);
+
+  if (values.length < 2) { return new Array<number>(values.length); }
+
+  const lastIndex = values.length - 1;
+  return values.map((value, index) => {
+      if (index === 0) {
+          // forward difference
+          return (values[index + 1] - values[index]) / h;
+      } else if (index === lastIndex) {
+          // backward difference
+          return (values[index] - values[index - 1]) / h;
+      } else {
+          // central difference
+          return (values[index + 1] - values[index - 1]) / (2 * h);
+      }
+  });
+}
+function movingSecondDerivative(values: number[], h: number): number[] {
+  assert(values !== null);
+  assert(h > 0);
+
+  if (values.length < 3) { return new Array<number>(values.length); }
+
+  const lastIndex = values.length - 1;
+  const hSquared = h * h;
+  return values.map((value, index) => {
+      if (index === 0) {
+          // forward
+          return (values[index + 2] - (2 * values[index + 1]) + values[index]) / hSquared;
+      } else if (index === lastIndex) {
+          // backward
+          return (values[index] - (2 * values[index - 1]) + values[index - 2]) / hSquared;
+      } else {
+          // central
+          return (values[index + 1] - (2 * values[index]) + values[index - 1]) / hSquared;
+      }
   });
 }
 
@@ -660,9 +730,6 @@ class App extends React.Component<{}, AppState> {
     const onToPhoneNumberChange = this.onToPhoneNumberChange.bind(this);
     const onSaveSettings = this.onSaveSettings.bind(this);
     const onSendTestTextClick = this.onSendTestTextClick.bind(this);
-    const chartOf = this.state.tradeAnalysis
-      ? `${this.state.tradeAnalysis.securitySymbol} ${this.state.tradeAnalysis.exchangeName} ${this.state.tradeAnalysis.timeframe}`
-      : "";
 
     return (
       <div className="App">
@@ -682,12 +749,10 @@ class App extends React.Component<{}, AppState> {
           <button onClick={onSaveSettings}>Save Settings</button>
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
-        <div>
-          {chartOf}
-        </div>
         <CandleStickChart tradeAnalysis={this.state.tradeAnalysis} />
         <VolumeChart tradeAnalysis={this.state.tradeAnalysis} />
         {this.state.tradeAnalysis ? <LineChart values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes} /> : null}
+        {this.state.tradeAnalysis ? <LineChart values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity} /> : null}
       </div>
     );
   }
@@ -697,7 +762,8 @@ export default App;
 
 // initialization
 function load15MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeName: string): Promise<TradeAnalysis> {
-  return fetch(`https://min-api.cryptocompare.com/data/histominute?fsym=${fromSymbol}&tsym=${toSymbol}&aggregate=15&e=${exchangeName}`)
+  const minutesPerCandlestick = 15;
+  return fetch(`https://min-api.cryptocompare.com/data/histominute?fsym=${fromSymbol}&tsym=${toSymbol}&aggregate=${minutesPerCandlestick}&e=${exchangeName}`)
     .then(response => {
       if (!response.ok) {
         console.log("Error fetching data from CryptoWatch.");
@@ -728,6 +794,6 @@ function load15MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeNam
         volumes[i] = json.Data[i].volumefrom;
       }
 
-      return new TradeAnalysis(fromSymbol + toSymbol, exchangeName, "15m", openTimes, opens, highs, lows, closes, volumes);
+      return new TradeAnalysis(fromSymbol + toSymbol, exchangeName, `${minutesPerCandlestick}m`, openTimes, opens, highs, lows, closes, volumes);
     });
 }
