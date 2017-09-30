@@ -172,8 +172,8 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
 
-  width = 1280;
-  height = 720;
+  width = 800;
+  height = 400;
 
   columnWidth = 15;
   columnHorizontalPadding = 1;
@@ -278,6 +278,86 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
     this.drawToCanvas();
   }
   componentDidUpdate(prevProps: CandlestickChartProps, prevState: {}) {
+    if (this.context2d === null) { return; }
+    
+    this.drawToCanvas();
+  }
+
+  render() {
+    return <canvas ref={domElement => this.canvasElement = domElement} width={this.width} height={this.height} />;
+  }
+}
+
+interface VolumeChartProps {
+  tradeAnalysis: TradeAnalysis | null;
+}
+class VolumeChart extends React.Component<VolumeChartProps, {}> {
+  canvasElement: HTMLCanvasElement | null;
+  context2d: CanvasRenderingContext2D | null;
+
+  width = 800;
+  height = 100;
+
+  columnWidth = 15;
+  columnHorizontalPadding = 1;
+
+  markerVerticalMargin = 5;
+
+  get maxVolume(): number {
+    if (!this.props.tradeAnalysis) { return 0; }
+    return Math.max(...this.props.tradeAnalysis.volumes);
+  }
+
+  volumeToY(price: number) {
+    const yPercentFromBottom = price / this.maxVolume;
+    const yFromBottom = yPercentFromBottom * this.height;
+    const yFromTop = this.height - yFromBottom;
+    return yFromTop;
+  }
+  drawToCanvas() {
+    if (this.context2d === null) { return; }
+
+    this.context2d.clearRect(0, 0, this.width, this.height);
+
+    if (this.props.tradeAnalysis) {
+      // draw candlesticks
+      const rightmostColumnX = this.width - this.columnWidth;
+      const rightmostCandlestickIndex = this.props.tradeAnalysis.candlestickCount - 1;
+  
+      const tradeAnalysis = this.props.tradeAnalysis;
+      for (let iFromRight = 0; iFromRight < tradeAnalysis.candlestickCount; iFromRight++) {
+        const i = rightmostCandlestickIndex - iFromRight;
+
+        const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+
+        const volume = tradeAnalysis.volumes[i];
+        const open = tradeAnalysis.opens[i];
+        const close = tradeAnalysis.closes[i];
+
+        const fillStyle = (close > open) ? "green" : "red";
+
+        const bodyLeft = columnX + this.columnHorizontalPadding;
+        const bodyRight = (columnX + this.columnWidth) - this.columnHorizontalPadding;
+        const bodyWidth = bodyRight - bodyLeft;
+        const bodyTop = this.volumeToY(volume);
+        const bodyBottom = this.volumeToY(0);
+        const bodyHeight = bodyBottom - bodyTop;
+
+        // body
+        fillRect(this.context2d, new Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
+      }
+    }
+  }
+
+  componentDidMount() {
+    if (this.canvasElement === null) { return; }
+
+    this.context2d = this.canvasElement.getContext("2d");
+    if (this.context2d === null) { return; }
+
+    this.drawToCanvas();
+  }
+  componentDidUpdate(prevProps: VolumeChartProps, prevState: {}) {
     if (this.context2d === null) { return; }
     
     this.drawToCanvas();
@@ -419,6 +499,7 @@ class App extends React.Component<{}, AppState> {
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
         <CandleStickChart tradeAnalysis={this.state.tradeAnalysis} />
+        <VolumeChart tradeAnalysis={this.state.tradeAnalysis} />
       </div>
     );
   }
