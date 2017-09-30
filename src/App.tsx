@@ -36,6 +36,9 @@ class Vector2 {
 }
 
 class TradeAnalysis {
+  securitySymbol: string;
+  exchangeName: string;
+  timeframe: string;
   openTimes: number[];
   opens: number[];
   highs: number[];
@@ -46,12 +49,18 @@ class TradeAnalysis {
   isReds: boolean[];
 
   constructor(
+    securitySymbol: string,
+    exchangeName: string,
+    timeframe: string,
     openTimes: number[],
     opens: number[],
     highs: number[],
     lows: number[],
     closes: number[],
     volumes: number[]) {
+      this.securitySymbol = securitySymbol;
+      this.exchangeName = exchangeName;
+      this.timeframe = timeframe;
       this.openTimes = openTimes;
       this.opens = opens;
       this.highs = highs;
@@ -437,7 +446,7 @@ class App extends React.Component<{}, AppState> {
   }
 
   reloadCandlesticks() {
-    loadBtcUsd15MinGeminiCandleSticks()
+    load15MinCandlesticks("BTC", "USD", "Gemini")
     .then(tradeAnalysis => {
       const lastOpenTime = this.state.tradeAnalysis
         ? this.state.tradeAnalysis.openTimes[this.state.tradeAnalysis.candlestickCount - 1]
@@ -493,6 +502,9 @@ class App extends React.Component<{}, AppState> {
     const onToPhoneNumberChange = this.onToPhoneNumberChange.bind(this);
     const onSaveSettings = this.onSaveSettings.bind(this);
     const onSendTestTextClick = this.onSendTestTextClick.bind(this);
+    const chartOf = this.state.tradeAnalysis
+      ? `${this.state.tradeAnalysis.securitySymbol} ${this.state.tradeAnalysis.exchangeName} ${this.state.tradeAnalysis.timeframe}`
+      : "";
 
     return (
       <div className="App">
@@ -512,6 +524,9 @@ class App extends React.Component<{}, AppState> {
           <button onClick={onSaveSettings}>Save Settings</button>
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
+        <div>
+          {chartOf}
+        </div>
         <CandleStickChart tradeAnalysis={this.state.tradeAnalysis} />
         <VolumeChart tradeAnalysis={this.state.tradeAnalysis} />
       </div>
@@ -522,8 +537,8 @@ class App extends React.Component<{}, AppState> {
 export default App;
 
 // initialization
-function loadBtcUsd15MinGeminiCandleSticks(): Promise<TradeAnalysis> {
-  return fetch("https://min-api.cryptocompare.com/data/histominute?fsym=BTC&tsym=USD&aggregate=15&e=Gemini")
+function load15MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeName: string): Promise<TradeAnalysis> {
+  return fetch(`https://min-api.cryptocompare.com/data/histominute?fsym=${fromSymbol}&tsym=${toSymbol}&aggregate=15&e=${exchangeName}`)
     .then(response => {
       if (!response.ok) {
         console.log("Error fetching data from CryptoWatch.");
@@ -554,6 +569,6 @@ function loadBtcUsd15MinGeminiCandleSticks(): Promise<TradeAnalysis> {
         volumes[i] = json.Data[i].volumefrom;
       }
 
-      return new TradeAnalysis(openTimes, opens, highs, lows, closes, volumes);
+      return new TradeAnalysis(fromSymbol + toSymbol, exchangeName, "15m", openTimes, opens, highs, lows, closes, volumes);
     });
 }
