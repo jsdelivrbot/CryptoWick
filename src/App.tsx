@@ -366,10 +366,11 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   }
 }
 
-interface VolumeChartProps {
-  tradeAnalysis: TradeAnalysis | null;
+interface HistogramChartProps {
+  values: number[];
+  colors: string[];
 }
-class VolumeChart extends React.Component<VolumeChartProps, {}> {
+class HistogramChart extends React.Component<HistogramChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
 
@@ -381,13 +382,13 @@ class VolumeChart extends React.Component<VolumeChartProps, {}> {
 
   markerVerticalMargin = 5;
 
-  get maxVolume(): number {
-    if (!this.props.tradeAnalysis) { return 0; }
-    return Math.max(...this.props.tradeAnalysis.volumes);
+  get maxValue(): number {
+    if (!this.props.values) { return 0; }
+    return Math.max(...this.props.values);
   }
 
-  volumeToY(volume: number): number {
-    const yPercentFromBottom = volume / this.maxVolume;
+  valueToY(value: number): number {
+    const yPercentFromBottom = value / this.maxValue;
     const yFromBottom = yPercentFromBottom * this.height;
     const yFromTop = this.height - yFromBottom;
     return yFromTop;
@@ -397,28 +398,25 @@ class VolumeChart extends React.Component<VolumeChartProps, {}> {
 
     this.context2d.clearRect(0, 0, this.width, this.height);
 
-    if (this.props.tradeAnalysis) {
+    if (this.props.values) {
       // draw candlesticks
       const rightmostColumnX = this.width - this.columnWidth;
-      const rightmostCandlestickIndex = this.props.tradeAnalysis.candlestickCount - 1;
+      const rightmostCandlestickIndex = this.props.values.length - 1;
   
-      const tradeAnalysis = this.props.tradeAnalysis;
-      for (let iFromRight = 0; iFromRight < tradeAnalysis.candlestickCount; iFromRight++) {
+      for (let iFromRight = 0; iFromRight < this.props.values.length; iFromRight++) {
         const i = rightmostCandlestickIndex - iFromRight;
 
         const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
 
-        const volume = tradeAnalysis.volumes[i];
-        const open = tradeAnalysis.opens[i];
-        const close = tradeAnalysis.closes[i];
+        const value = this.props.values[i];
 
-        const fillStyle = (close > open) ? "green" : "red";
+        const fillStyle = this.props.colors ? this.props.colors[i] : "black";
 
         const bodyLeft = columnX + this.columnHorizontalPadding;
         const bodyRight = (columnX + this.columnWidth) - this.columnHorizontalPadding;
         const bodyWidth = bodyRight - bodyLeft;
-        const bodyTop = this.volumeToY(volume);
-        const bodyBottom = this.volumeToY(0);
+        const bodyTop = this.valueToY(value);
+        const bodyBottom = this.valueToY(0);
         const bodyHeight = bodyBottom - bodyTop;
 
         // body
@@ -435,7 +433,7 @@ class VolumeChart extends React.Component<VolumeChartProps, {}> {
 
     this.drawToCanvas();
   }
-  componentDidUpdate(prevProps: VolumeChartProps, prevState: {}) {
+  componentDidUpdate(prevProps: HistogramChartProps, prevState: {}) {
     if (this.context2d === null) { return; }
     
     this.drawToCanvas();
@@ -619,6 +617,18 @@ function movingSecondDerivative(values: number[], h: number): number[] {
   });
 }
 
+function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1, e2: T2) => TR): TR[] {
+  assert(arr1.length === arr2.length);
+
+  let result = new Array<TR>(arr1.length);
+
+  for(let i = 0; i < result.length; i++) {
+    result[i] = combineFunc(arr1[i], arr2[i]);
+  }
+
+  return result;
+}
+
 interface AppState {
   tradeAnalysis: TradeAnalysis | null;
   twilioAccountSid: string;
@@ -688,7 +698,8 @@ class App extends React.Component<{}, AppState> {
           tradeAnalysis: tradeAnalysis
         });
 
-        const isEntrySignal = tradeAnalysis.isLocalMinima[tradeAnalysis.candlestickCount - 1];
+        //const isEntrySignal = tradeAnalysis.isLocalMinima[tradeAnalysis.candlestickCount - 1];
+        const isEntrySignal = false;
         if (isEntrySignal && this.state.twilioAccountSid) {
           sendTextWithTwilio(
             this.state.twilioAccountSid,
@@ -696,6 +707,17 @@ class App extends React.Component<{}, AppState> {
             this.state.fromPhoneNumber,
             this.state.toPhoneNumber,
             "Entry signal."
+          );
+        }
+
+        const isExitSignal = tradeAnalysis.isBearish[tradeAnalysis.candlestickCount - 1];
+        if (isExitSignal && this.state.twilioAccountSid) {
+          sendTextWithTwilio(
+            this.state.twilioAccountSid,
+            this.state.twilioAuthToken,
+            this.state.fromPhoneNumber,
+            this.state.toPhoneNumber,
+            "Exit signal."
           );
         }
       }
@@ -730,6 +752,13 @@ class App extends React.Component<{}, AppState> {
     const onToPhoneNumberChange = this.onToPhoneNumberChange.bind(this);
     const onSaveSettings = this.onSaveSettings.bind(this);
     const onSendTestTextClick = this.onSendTestTextClick.bind(this);
+    const candlestickColors = this.state.tradeAnalysis
+      ? combineArrays(
+          this.state.tradeAnalysis.opens,
+          this.state.tradeAnalysis.closes,
+          (open, close) => (close > open) ? "green" : "red"
+        )
+      : [];
 
     return (
       <div className="App">
@@ -750,7 +779,7 @@ class App extends React.Component<{}, AppState> {
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
         <CandleStickChart tradeAnalysis={this.state.tradeAnalysis} />
-        <VolumeChart tradeAnalysis={this.state.tradeAnalysis} />
+        {this.state.tradeAnalysis ? <HistogramChart values={this.state.tradeAnalysis.volumes} colors={candlestickColors} /> : null}
         {this.state.tradeAnalysis ? <LineChart values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes} /> : null}
         {this.state.tradeAnalysis ? <LineChart values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity} /> : null}
       </div>
