@@ -50,6 +50,7 @@ class TradeAnalysis {
   isLocalMaxima: boolean[];
   lineOfBestFitPercentCloseSlopes: number[];
   lineOfBestFitPercentCloseSlopeConcavity: number[];
+  sma20: number[];
   isBearish: boolean[];
 
   constructor(
@@ -80,6 +81,8 @@ class TradeAnalysis {
       this.lineOfBestFitPercentCloseSlopeConcavity = movingSecondDerivative(
         this.lineOfBestFitPercentCloseSlopes, 1
       );
+
+      this.sma20 = laggingSimpleMovingAverage(this.closes, 4);
 
       this.isBearish = new Array<boolean>(this.candlestickCount);
       for(let i = 0; i < this.isBearish.length; i++) {
@@ -340,6 +343,15 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
       }
+
+      // draw SMA
+      const candlestickCount = this.props.tradeAnalysis.candlestickCount;
+      const smaPoints = this.props.tradeAnalysis.sma20.map((value, index) => {
+        const iFromRight = (candlestickCount - 1) - index;
+
+        return new Vector2(this.iFromRightToColumnX(iFromRight) + (this.columnWidth / 2), this.priceToY(value));
+      });
+      strokePolyline(this.context2d, smaPoints, "black");
 
       // draw chart title
       const chartTitle = `${this.props.tradeAnalysis.securitySymbol} ${this.props.tradeAnalysis.exchangeName} ${this.props.tradeAnalysis.timeframe}`;
@@ -615,6 +627,58 @@ function movingSecondDerivative(values: number[], h: number): number[] {
           return (values[index + 1] - (2 * values[index]) + values[index - 1]) / hSquared;
       }
   });
+}
+
+function mean(values: number[]): number {
+  let valueSum = 0;
+  
+  for(let i = 0; i < values.length; i++) {
+      valueSum += values[i];
+  }
+
+  return valueSum / values.length;
+}
+function meanArraySlice(values: number[], startIndex: number, valueCount: number): number {
+  assert(values !== null);
+  assert(valueCount >= 1);
+  assert((startIndex + valueCount) <= values.length);
+
+  let valueSum = 0;
+
+  const endIndexExclusive = startIndex + valueCount;
+  for (let i = startIndex; i < endIndexExclusive; i++) {
+      valueSum += values[i];
+  }
+
+  return valueSum / valueCount;
+}
+function laggingSimpleMovingAverage(values: number[], lookbacklength: number): number[] {
+  assert(values !== null);
+  assert(lookbacklength > 0);
+
+  return values.map((value, currentValueIndex) => {
+      const firstValueIndex = Math.max(currentValueIndex - (lookbacklength - 1), 0);
+      const valueCount = (currentValueIndex - firstValueIndex) + 1;
+
+      return meanArraySlice(values, firstValueIndex, valueCount);
+  });
+}
+function laggingExponentialMovingAverage(values: number[], lookbacklength: number): number[] {
+  assert(values !== null);
+  assert(lookbacklength > 0);
+
+  if(values.length === 0) { return new Array<number>(0); }
+
+  const alpha = 2.0 / (lookbacklength + 1); // smoothing factor
+  let ema = new Array<number>(values.length);
+
+  ema[0] = values[0];
+
+  for(let i = 1; i < values.length; i++) {
+      ema[i] = ((1.0 - alpha) * ema[i - 1]) + (alpha * values[i]);
+  }
+
+  return ema;
 }
 
 function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1, e2: T2) => TR): TR[] {
