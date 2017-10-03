@@ -1,4 +1,5 @@
 import * as React from "react";
+import { HmacSHA384, enc } from "crypto-js";
 import "./App.css";
 
 //const logo = require("./logo.svg");
@@ -96,7 +97,7 @@ class TradeAnalysis {
         this.lineOfBestFitPercentCloseSlopes, 1
       );
 
-      this.sma20 = laggingSimpleMovingAverage(this.closes, 4);
+      this.sma20 = laggingSimpleMovingAverage(this.closes, 8);
       this.sma1stDerivative = movingDerivative(this.sma20, 1);
       this.sma2ndDerivative = movingSecondDerivative(this.sma20, 1);
 
@@ -197,6 +198,9 @@ function areLocalMaxima(candlestickRadius: number, highs: number[]): boolean[] {
 
 class Settings {
   constructor(
+    public geminiApiKey: string,
+    public geminiApiSecret: string,
+
     public twilioAccountSid: string,
     public twilioAuthToken: string,
     public fromPhoneNumber: string,
@@ -757,6 +761,10 @@ function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1,
 
 interface AppState {
   tradeAnalysis: TradeAnalysis | null;
+
+  geminiApiKey: string;
+  geminiApiSecret: string;
+
   twilioAccountSid: string;
   twilioAuthToken: string;
   fromPhoneNumber: string;
@@ -779,6 +787,10 @@ class App extends React.Component<{}, AppState> {
 
     this.state = {
       tradeAnalysis: null,
+
+      geminiApiKey: "",
+      geminiApiSecret: "",
+
       twilioAccountSid: "",
       twilioAuthToken: "",
       fromPhoneNumber: "+1",
@@ -786,6 +798,13 @@ class App extends React.Component<{}, AppState> {
 
       scrollOffsetInColumns: 0
     };
+  }
+
+  onGeminiApiKeyChange(event: any) {
+    this.setState({ geminiApiKey: event.target.value });
+  }
+  onGeminiApiSecretChange(event: any) {
+    this.setState({ geminiApiSecret: event.target.value });
   }
 
   onTwilioAccountSidChange(event: any) {
@@ -814,6 +833,9 @@ class App extends React.Component<{}, AppState> {
 
   onSaveSettings(event: any) {
     const settings = new Settings(
+      this.state.geminiApiKey,
+      this.state.geminiApiSecret,
+
       this.state.twilioAccountSid,
       this.state.twilioAuthToken,
       this.state.fromPhoneNumber,
@@ -830,7 +852,7 @@ class App extends React.Component<{}, AppState> {
   }
 
   reloadCandlesticks() {
-    load15MinCandlesticks("BTC", "USD", "Gemini")
+    load15MinCandlesticks("ETH", "USD", "Gemini")
     .then(tradeAnalysis => {
       const lastOpenTime = this.state.tradeAnalysis
         ? this.state.tradeAnalysis.openTimes[this.state.tradeAnalysis.candlestickCount - 1]
@@ -874,6 +896,9 @@ class App extends React.Component<{}, AppState> {
     const settings = loadSettings();
     if (settings) {
       this.setState({
+        geminiApiKey: settings.geminiApiKey,
+        geminiApiSecret: settings.geminiApiSecret,
+
         twilioAccountSid: settings.twilioAccountSid,
         twilioAuthToken: settings.twilioAuthToken,
         fromPhoneNumber: settings.fromPhoneNumber,
@@ -881,11 +906,17 @@ class App extends React.Component<{}, AppState> {
       });
     }
 
-    this.reloadCandlesticks();
-    this.refreshCandlesticksIntervalHandle = setInterval(
-      this.reloadCandlesticks.bind(this),
-      1000 * this.refreshIntervalSeconds
-    );
+    if(settings && settings.twilioAccountSid) {
+      this.reloadCandlesticks();
+      this.refreshCandlesticksIntervalHandle = setInterval(
+        this.reloadCandlesticks.bind(this),
+        1000 * this.refreshIntervalSeconds
+      );
+    }
+
+    if(settings && settings.geminiApiKey) {
+      loadGeminiBalances(this.state.geminiApiKey, this.state.geminiApiSecret);
+    }
 
     this.keyDownEventHandler = this.onKeyDown.bind(this);
     window.addEventListener("keydown", this.keyDownEventHandler);
@@ -898,7 +929,7 @@ class App extends React.Component<{}, AppState> {
   renderCharts() {
     if(!this.state.tradeAnalysis) { return null; }
 
-    const useHeikinAshiCandlesticks = true;
+    const useHeikinAshiCandlesticks = false;
 
     const opens = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.opens : this.state.tradeAnalysis.heikinOpens;
     const highs = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.highs : this.state.tradeAnalysis.heikinHighs;
@@ -985,6 +1016,8 @@ class App extends React.Component<{}, AppState> {
     );
   }
   render() {
+    const onGeminiApiKeyChange = this.onGeminiApiKeyChange.bind(this);
+    const onGeminiApiSecretChange = this.onGeminiApiSecretChange.bind(this);
     const onTwilioAccountSidChange = this.onTwilioAccountSidChange.bind(this);
     const onTwilioAuthTokenChange = this.onTwilioAuthTokenChange.bind(this);
     const onFromPhoneNumberChange = this.onFromPhoneNumberChange.bind(this);
@@ -994,6 +1027,8 @@ class App extends React.Component<{}, AppState> {
 
     return (
       <div className="App">
+        {this.state.tradeAnalysis ? <p>Last: {this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1]}</p> : null}
+        {this.renderCharts()}
         <div>
           Twilio Account SID
           <input type="text" value={this.state.twilioAccountSid} onChange={onTwilioAccountSidChange} />
@@ -1006,11 +1041,18 @@ class App extends React.Component<{}, AppState> {
 
           To
           <input type="text" value={this.state.toPhoneNumber} onChange={onToPhoneNumberChange} />
+        </div>
+        <div>
+          Gemini Public Key
+          <input type="text" value={this.state.geminiApiKey} onChange={onGeminiApiKeyChange} />
 
+          Gemini Private Key
+          <input type="text" value={this.state.geminiApiSecret} onChange={onGeminiApiSecretChange} />
+        </div>
+        <div>
           <button onClick={onSaveSettings}>Save Settings</button>
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
-        {this.renderCharts()}
       </div>
     );
   }
@@ -1054,4 +1096,49 @@ function load15MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeNam
 
       return new TradeAnalysis(fromSymbol + toSymbol, exchangeName, `${minutesPerCandlestick}m`, openTimes, opens, highs, lows, closes, volumes);
     });
+}
+
+let lastNonce = 0;
+function nextNonce(): number {
+  var newNonce = (new Date()).getTime();
+  newNonce = Math.max(newNonce, lastNonce + 1); // Ensure the nonce is monotonically increasing.
+
+  lastNonce = newNonce;
+
+  return newNonce;
+}
+
+function loadGeminiBalances(apiKey: string, apiSecret: string) {
+  const payload = {
+    request: "/v1/balances",
+    nonce: nextNonce.toString()
+  };
+
+  return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/balances", payload)
+    .then(response => {
+      if (!response.ok) {
+        console.log("Error fetching data from Gemini.");
+        return;
+      }
+
+      return response.json();
+    }).then(json => {
+      console.log(json);
+    });
+}
+function callGeminiPrivateApi(apiKey: string, apiSecret: string, url: string, payload: any) {
+  const jsonPayload = JSON.stringify(payload);
+  const base64JsonPayload = btoa(jsonPayload);
+  const hashedSignatureBytes = HmacSHA384(apiSecret, base64JsonPayload);
+  const signature = enc.Hex.stringify(hashedSignatureBytes);
+
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      "X-GEMINI-APIKEY": apiKey,
+      "X-GEMINI-PAYLOAD": base64JsonPayload,
+      "X-GEMINI-SIGNATURE": signature
+    },
+    body: ""
+  });
 }
