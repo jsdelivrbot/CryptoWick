@@ -272,6 +272,7 @@ interface CandlestickChartProps {
   height: number;
   columnWidth: number;
   columnHorizontalPadding: number;
+  scrollOffsetInColumns: number;
 }
 class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
@@ -294,9 +295,9 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 
     return i;
   }
-  iFromRightToColumnX(iFromRight: number): number {
+  iFromRightToColumnX(iFromRight: number, scrollOffsetInColumns: number): number {
     const rightmostColumnX = this.props.width - this.props.columnWidth;
-    const columnX = rightmostColumnX - (iFromRight * this.props.columnWidth);
+    const columnX = rightmostColumnX - ((iFromRight + scrollOffsetInColumns) * this.props.columnWidth);
 
     return columnX;
   }
@@ -311,7 +312,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
     if(!this.props.tradeAnalysis || !this.context2d) { return; }
     
     const i = this.iFromRightToI(iFromRight);
-    const columnX = this.iFromRightToColumnX(iFromRight);
+    const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
 
     const open = this.props.opens[i];
     const high = this.props.highs[i];
@@ -354,7 +355,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
       // draw boolean indicators
       for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
         const i = this.iFromRightToI(iFromRight);
-        const columnX = this.iFromRightToColumnX(iFromRight);
+        const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
 
         const high = this.props.highs[i];
         const wickTop = this.priceToY(high);
@@ -388,7 +389,10 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
       const smaPoints = this.props.tradeAnalysis.sma20.map((value, index) => {
         const iFromRight = (candlestickCount - 1) - index;
 
-        return new Vector2(this.iFromRightToColumnX(iFromRight) + (this.props.columnWidth / 2), this.priceToY(value));
+        return new Vector2(
+          this.iFromRightToColumnX(iFromRight,
+            this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2), this.priceToY(value)
+        );
       });
       strokePolyline(this.context2d, smaPoints, "black");
 
@@ -425,6 +429,7 @@ interface HistogramChartProps {
   height: number;
   columnWidth: number;
   columnHorizontalPadding: number;
+  scrollOffsetInColumns: number;
 }
 class HistogramChart extends React.Component<HistogramChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
@@ -435,6 +440,18 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
     return Math.max(...this.props.values);
   }
 
+  iFromRightToI(iFromRight: number): number {
+    const rightmostCandlestickIndex = this.props.values.length - 1;
+    const i = rightmostCandlestickIndex - iFromRight;
+
+    return i;
+  }
+  iFromRightToColumnX(iFromRight: number, scrollOffsetInColumns: number): number {
+    const rightmostColumnX = this.props.width - this.props.columnWidth;
+    const columnX = rightmostColumnX - ((iFromRight + scrollOffsetInColumns) * this.props.columnWidth);
+
+    return columnX;
+  }
   valueToY(value: number): number {
     const yPercentFromBottom = value / this.maxValue;
     const yFromBottom = yPercentFromBottom * this.props.height;
@@ -448,13 +465,9 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
 
     if (this.props.values) {
       // draw bars
-      const rightmostColumnX = this.props.width - this.props.columnWidth;
-      const rightmostCandlestickIndex = this.props.values.length - 1;
-  
       for (let iFromRight = 0; iFromRight < this.props.values.length; iFromRight++) {
-        const i = rightmostCandlestickIndex - iFromRight;
-
-        const columnX = rightmostColumnX - (iFromRight * this.props.columnWidth);
+        const i = this.iFromRightToI(iFromRight);
+        const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
 
         const value = this.props.values[i];
 
@@ -502,11 +515,24 @@ interface LineChartProps {
   height: number;
   columnWidth: number;
   columnHorizontalPadding: number;
+  scrollOffsetInColumns: number;
 }
 class LineChart extends React.Component<LineChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
 
+  iFromRightToI(iFromRight: number): number {
+    const rightmostCandlestickIndex = this.props.values.length - 1;
+    const i = rightmostCandlestickIndex - iFromRight;
+
+    return i;
+  }
+  iFromRightToColumnX(iFromRight: number, scrollOffsetInColumns: number): number {
+    const rightmostColumnX = this.props.width - this.props.columnWidth;
+    const columnX = rightmostColumnX - ((iFromRight + scrollOffsetInColumns) * this.props.columnWidth);
+
+    return columnX;
+  }
   valueToY(value: number): number {
     const maxAbsValue = Math.max(...this.props.values.map(Math.abs));
     const minValue = -maxAbsValue;
@@ -520,14 +546,11 @@ class LineChart extends React.Component<LineChartProps, {}> {
     return yFromTop;
   }
   getPolyline(): Vector2[] {
-    const rightmostColumnX = this.props.width - this.props.columnWidth;
-    const rightmostCandlestickIndex = this.props.values.length - 1;
-
     let points = new Array<Vector2>(this.props.values.length);
 
     for (let iFromRight = 0; iFromRight < points.length; iFromRight++) {
-      const i = rightmostCandlestickIndex - iFromRight;
-      const columnX = rightmostColumnX - (iFromRight * this.props.columnWidth);
+      const i = this.iFromRightToI(iFromRight);
+      const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
       const value = this.props.values[i];
 
       const point = new Vector2(columnX + (this.props.columnWidth / 2), this.valueToY(value));
@@ -738,11 +761,18 @@ interface AppState {
   twilioAuthToken: string;
   fromPhoneNumber: string;
   toPhoneNumber: string;
+
+  scrollOffsetInColumns: number;
 }
+
+const ARROW_LEFT_KEY_CODE = 37;
+const ARROW_RIGHT_KEY_CODE = 39;
 
 class App extends React.Component<{}, AppState> {
   refreshCandlesticksIntervalHandle: number;
   refreshIntervalSeconds = 30;
+  
+  keyDownEventHandler: (event: KeyboardEvent) => void;
 
   constructor() {
     super();
@@ -752,7 +782,9 @@ class App extends React.Component<{}, AppState> {
       twilioAccountSid: "",
       twilioAuthToken: "",
       fromPhoneNumber: "+1",
-      toPhoneNumber: "+1"
+      toPhoneNumber: "+1",
+
+      scrollOffsetInColumns: 0
     };
   }
 
@@ -767,6 +799,17 @@ class App extends React.Component<{}, AppState> {
   }
   onToPhoneNumberChange(event: any) {
     this.setState({ toPhoneNumber: event.target.value });
+  }
+
+  onKeyDown(event: KeyboardEvent) {
+    switch(event.keyCode) {
+      case ARROW_LEFT_KEY_CODE:
+        this.setState({ scrollOffsetInColumns: this.state.scrollOffsetInColumns - 1 });
+        break;
+      case ARROW_RIGHT_KEY_CODE:
+        this.setState({ scrollOffsetInColumns: this.state.scrollOffsetInColumns + 1 });
+        break;
+    }
   }
 
   onSaveSettings(event: any) {
@@ -839,13 +882,17 @@ class App extends React.Component<{}, AppState> {
     }
 
     this.reloadCandlesticks();
-
     this.refreshCandlesticksIntervalHandle = setInterval(
       this.reloadCandlesticks.bind(this),
       1000 * this.refreshIntervalSeconds
     );
+
+    this.keyDownEventHandler = this.onKeyDown.bind(this);
+    window.addEventListener("keydown", this.keyDownEventHandler);
   }
   componentWillUnmount() {
+    window.removeEventListener("keydown", this.keyDownEventHandler);
+
     clearInterval(this.refreshCandlesticksIntervalHandle);
   }
   renderCharts() {
@@ -869,6 +916,8 @@ class App extends React.Component<{}, AppState> {
     const columnWidth = 10;
     const columnHorizontalPadding = 1;
 
+    const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
+
     return (
       <div>
         <CandleStickChart
@@ -881,6 +930,7 @@ class App extends React.Component<{}, AppState> {
           height={300}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
 
         <HistogramChart
@@ -891,6 +941,7 @@ class App extends React.Component<{}, AppState> {
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
 
         <LineChart
@@ -900,6 +951,7 @@ class App extends React.Component<{}, AppState> {
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
         <LineChart
           chartTitle="SMA 2nd d/dt"
@@ -908,6 +960,7 @@ class App extends React.Component<{}, AppState> {
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
 
         <LineChart
@@ -917,6 +970,7 @@ class App extends React.Component<{}, AppState> {
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
         <LineChart
           chartTitle="Lin. Reg. % Close Slope Concavity"
@@ -925,6 +979,7 @@ class App extends React.Component<{}, AppState> {
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
       </div>
     );
