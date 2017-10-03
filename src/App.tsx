@@ -260,24 +260,22 @@ function strokePolyline(context2d: CanvasRenderingContext2D, points: Vector2[], 
   context2d.stroke();
 }
 
+const MARKER_VERTICAL_MARGIN = 5;
+
 interface CandlestickChartProps {
   tradeAnalysis: TradeAnalysis | null;
   opens: number[];
   highs: number[];
   lows: number[];
   closes: number[];
+  width: number;
+  height: number;
+  columnWidth: number;
+  columnHorizontalPadding: number;
 }
 class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
-
-  width = 800;
-  height = 300;
-
-  columnWidth = 15;
-  columnHorizontalPadding = 1;
-
-  markerVerticalMargin = 5;
 
   get minPrice(): number {
     if (!this.props.tradeAnalysis) { return 0; }
@@ -297,16 +295,16 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
     return i;
   }
   iFromRightToColumnX(iFromRight: number): number {
-    const rightmostColumnX = this.width - this.columnWidth;
-    const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+    const rightmostColumnX = this.props.width - this.props.columnWidth;
+    const columnX = rightmostColumnX - (iFromRight * this.props.columnWidth);
 
     return columnX;
   }
   priceToY(price: number): number {
     const priceRange = this.maxPrice - this.minPrice;
     const yPercentFromBottom = (price - this.minPrice) / priceRange;
-    const yFromBottom = yPercentFromBottom * this.height;
-    const yFromTop = this.height - yFromBottom;
+    const yFromBottom = yPercentFromBottom * this.props.height;
+    const yFromTop = this.props.height - yFromBottom;
     return yFromTop;
   }
   drawCandlestick(iFromRight: number) {
@@ -322,8 +320,8 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 
     const fillStyle = (close > open) ? "green" : "red";
 
-    const bodyLeft = columnX + this.columnHorizontalPadding;
-    const bodyRight = (columnX + this.columnWidth) - this.columnHorizontalPadding;
+    const bodyLeft = columnX + this.props.columnHorizontalPadding;
+    const bodyRight = (columnX + this.props.columnWidth) - this.props.columnHorizontalPadding;
     const bodyWidth = bodyRight - bodyLeft;
     const bodyMaxPrice = Math.max(open, close);
     const bodyMinPrice = Math.min(open, close);
@@ -331,7 +329,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
     const bodyBottom = this.priceToY(bodyMinPrice);
     const bodyHeight = bodyBottom - bodyTop;
 
-    const wickLeft = columnX + (this.columnWidth / 2);
+    const wickLeft = columnX + (this.props.columnWidth / 2);
     const wickTop = this.priceToY(high);
     const wickBottom = this.priceToY(low);
     const wickHeight = wickBottom - wickTop;
@@ -345,7 +343,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   drawToCanvas() {
     if (this.context2d === null) { return; }
 
-    this.context2d.clearRect(0, 0, this.width, this.height);
+    this.context2d.clearRect(0, 0, this.props.width, this.props.height);
 
     if (this.props.tradeAnalysis) {
       // draw candlesticks
@@ -364,9 +362,9 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         const low = this.props.lows[i];
         const wickBottom = this.priceToY(low);
 
-        const circleRadius = (this.columnWidth / 2) - this.columnHorizontalPadding;
-        const circleX = columnX + (this.columnWidth / 2);
-        const circleYMarginFromWick = circleRadius + this.markerVerticalMargin;
+        const circleRadius = (this.props.columnWidth / 2) - this.props.columnHorizontalPadding;
+        const circleX = columnX + (this.props.columnWidth / 2);
+        const circleYMarginFromWick = circleRadius + MARKER_VERTICAL_MARGIN;
         const fillStyle = "black";
         
         /*if (this.props.tradeAnalysis.isLocalMinima[i]) {
@@ -390,7 +388,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
       const smaPoints = this.props.tradeAnalysis.sma20.map((value, index) => {
         const iFromRight = (candlestickCount - 1) - index;
 
-        return new Vector2(this.iFromRightToColumnX(iFromRight) + (this.columnWidth / 2), this.priceToY(value));
+        return new Vector2(this.iFromRightToColumnX(iFromRight) + (this.props.columnWidth / 2), this.priceToY(value));
       });
       strokePolyline(this.context2d, smaPoints, "black");
 
@@ -415,7 +413,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   }
 
   render() {
-    return <canvas ref={domElement => this.canvasElement = domElement} width={this.width} height={this.height} />;
+    return <canvas ref={domElement => this.canvasElement = domElement} width={this.props.width} height={this.props.height} />;
   }
 }
 
@@ -423,18 +421,14 @@ interface HistogramChartProps {
   chartTitle: string;
   values: number[];
   colors: string[];
+  width: number;
+  height: number;
+  columnWidth: number;
+  columnHorizontalPadding: number;
 }
 class HistogramChart extends React.Component<HistogramChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
-
-  width = 800;
-  height = 100;
-
-  columnWidth = 15;
-  columnHorizontalPadding = 1;
-
-  markerVerticalMargin = 5;
 
   get maxValue(): number {
     if (!this.props.values) { return 0; }
@@ -443,31 +437,31 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
 
   valueToY(value: number): number {
     const yPercentFromBottom = value / this.maxValue;
-    const yFromBottom = yPercentFromBottom * this.height;
-    const yFromTop = this.height - yFromBottom;
+    const yFromBottom = yPercentFromBottom * this.props.height;
+    const yFromTop = this.props.height - yFromBottom;
     return yFromTop;
   }
   drawToCanvas() {
     if (this.context2d === null) { return; }
 
-    this.context2d.clearRect(0, 0, this.width, this.height);
+    this.context2d.clearRect(0, 0, this.props.width, this.props.height);
 
     if (this.props.values) {
       // draw bars
-      const rightmostColumnX = this.width - this.columnWidth;
+      const rightmostColumnX = this.props.width - this.props.columnWidth;
       const rightmostCandlestickIndex = this.props.values.length - 1;
   
       for (let iFromRight = 0; iFromRight < this.props.values.length; iFromRight++) {
         const i = rightmostCandlestickIndex - iFromRight;
 
-        const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+        const columnX = rightmostColumnX - (iFromRight * this.props.columnWidth);
 
         const value = this.props.values[i];
 
         const fillStyle = this.props.colors ? this.props.colors[i] : "black";
 
-        const bodyLeft = columnX + this.columnHorizontalPadding;
-        const bodyRight = (columnX + this.columnWidth) - this.columnHorizontalPadding;
+        const bodyLeft = columnX + this.props.columnHorizontalPadding;
+        const bodyRight = (columnX + this.props.columnWidth) - this.props.columnHorizontalPadding;
         const bodyWidth = bodyRight - bodyLeft;
         const bodyTop = this.valueToY(value);
         const bodyBottom = this.valueToY(0);
@@ -497,25 +491,21 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
   }
 
   render() {
-    return <canvas ref={domElement => this.canvasElement = domElement} width={this.width} height={this.height} />;
+    return <canvas ref={domElement => this.canvasElement = domElement} width={this.props.width} height={this.props.height} />;
   }
 }
 
 interface LineChartProps {
   chartTitle: string;
   values: number[];
+  width: number;
+  height: number;
+  columnWidth: number;
+  columnHorizontalPadding: number;
 }
 class LineChart extends React.Component<LineChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
-
-  width = 800;
-  height = 100;
-
-  columnWidth = 15;
-  columnHorizontalPadding = 1;
-
-  markerVerticalMargin = 5;
 
   valueToY(value: number): number {
     const maxAbsValue = Math.max(...this.props.values.map(Math.abs));
@@ -524,23 +514,23 @@ class LineChart extends React.Component<LineChartProps, {}> {
 
     const valueRange = maxValue - minValue;
     const yPercentFromBottom = (value - minValue) / valueRange;
-    const yFromBottom = yPercentFromBottom * this.height;
-    const yFromTop = this.height - yFromBottom;
+    const yFromBottom = yPercentFromBottom * this.props.height;
+    const yFromTop = this.props.height - yFromBottom;
 
     return yFromTop;
   }
   getPolyline(): Vector2[] {
-    const rightmostColumnX = this.width - this.columnWidth;
+    const rightmostColumnX = this.props.width - this.props.columnWidth;
     const rightmostCandlestickIndex = this.props.values.length - 1;
 
     let points = new Array<Vector2>(this.props.values.length);
 
     for (let iFromRight = 0; iFromRight < points.length; iFromRight++) {
       const i = rightmostCandlestickIndex - iFromRight;
-      const columnX = rightmostColumnX - (iFromRight * this.columnWidth);
+      const columnX = rightmostColumnX - (iFromRight * this.props.columnWidth);
       const value = this.props.values[i];
 
-      const point = new Vector2(columnX + (this.columnWidth / 2), this.valueToY(value));
+      const point = new Vector2(columnX + (this.props.columnWidth / 2), this.valueToY(value));
       points[i] = point;
     }
 
@@ -549,11 +539,11 @@ class LineChart extends React.Component<LineChartProps, {}> {
   drawToCanvas() {
     if (this.context2d === null) { return; }
 
-    this.context2d.clearRect(0, 0, this.width, this.height);
+    this.context2d.clearRect(0, 0, this.props.width, this.props.height);
 
     // draw x-axis
     const xAxisY = this.valueToY(0);
-    strokeLine(this.context2d, new Vector2(0, xAxisY), new Vector2(this.width, xAxisY), "rgb(0, 0, 0)");
+    strokeLine(this.context2d, new Vector2(0, xAxisY), new Vector2(this.props.width, xAxisY), "rgb(0, 0, 0)");
 
     const polyline = this.getPolyline();
     strokePolyline(this.context2d, polyline, "rgb(0, 0, 0)");
@@ -577,7 +567,7 @@ class LineChart extends React.Component<LineChartProps, {}> {
   }
 
   render() {
-    return <canvas ref={domElement => this.canvasElement = domElement} width={this.width} height={this.height} />;
+    return <canvas ref={domElement => this.canvasElement = domElement} width={this.props.width} height={this.props.height} />;
   }
 }
 
@@ -875,25 +865,69 @@ class App extends React.Component<{}, AppState> {
           (open, close) => (close > open) ? "green" : "red"
         )
       : [];
+    
+    const columnWidth = 10;
+    const columnHorizontalPadding = 1;
 
-      return (
-        <div>
-          <CandleStickChart
-            tradeAnalysis={this.state.tradeAnalysis}
-            opens={opens}
-            highs={highs}
-            lows={lows}
-            closes={closes}
-            />
-          <HistogramChart chartTitle="Volume" values={this.state.tradeAnalysis.volumes} colors={candlestickColors} />
+    return (
+      <div>
+        <CandleStickChart
+          tradeAnalysis={this.state.tradeAnalysis}
+          opens={opens}
+          highs={highs}
+          lows={lows}
+          closes={closes}
+          width={800}
+          height={300}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+        />
 
-          <LineChart chartTitle="SMA 1st d/dt" values={this.state.tradeAnalysis.sma1stDerivative} />
-          <LineChart chartTitle="SMA 2nd d/dt" values={this.state.tradeAnalysis.sma2ndDerivative} />
+        <HistogramChart
+          chartTitle="Volume"
+          values={this.state.tradeAnalysis.volumes}
+          colors={candlestickColors}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+        />
 
-          <LineChart chartTitle="Lin. Reg. % Close Slope" values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes} />
-          <LineChart chartTitle="Lin. Reg. % Close Slope Concavity" values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity} />
-        </div>
-      );
+        <LineChart
+          chartTitle="SMA 1st d/dt"
+          values={this.state.tradeAnalysis.sma1stDerivative}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+        />
+        <LineChart
+          chartTitle="SMA 2nd d/dt"
+          values={this.state.tradeAnalysis.sma2ndDerivative}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+        />
+
+        <LineChart
+          chartTitle="Lin. Reg. % Close Slope"
+          values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+        />
+        <LineChart
+          chartTitle="Lin. Reg. % Close Slope Concavity"
+          values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+        />
+      </div>
+    );
   }
   render() {
     const onTwilioAccountSidChange = this.onTwilioAccountSidChange.bind(this);
