@@ -39,6 +39,7 @@ class TradeAnalysis {
   securitySymbol: string;
   exchangeName: string;
   timeframe: string;
+
   openTimes: number[];
   opens: number[];
   highs: number[];
@@ -46,11 +47,21 @@ class TradeAnalysis {
   closes: number[];
   volumes: number[];
 
+  heikinOpens: number[];
+  heikinHighs: number[];
+  heikinLows: number[];
+  heikinCloses: number[];
+
   isLocalMinima: boolean[];
   isLocalMaxima: boolean[];
+
   lineOfBestFitPercentCloseSlopes: number[];
   lineOfBestFitPercentCloseSlopeConcavity: number[];
+
   sma20: number[];
+  sma1stDerivative: number[];
+  sma2ndDerivative: number[];
+
   isBearish: boolean[];
 
   constructor(
@@ -66,12 +77,15 @@ class TradeAnalysis {
       this.securitySymbol = securitySymbol;
       this.exchangeName = exchangeName;
       this.timeframe = timeframe;
+      
       this.openTimes = openTimes;
       this.opens = opens;
       this.highs = highs;
       this.lows = lows;
       this.closes = closes;
       this.volumes = volumes;
+
+      this.calculateHeikinAshiCandlesticks();
 
       //this.isGreens = areConsecutiveBullishCandlesticks(4, this.opens, this.closes);
       this.isLocalMinima = areLocalMinima(2, this.lows);
@@ -83,6 +97,8 @@ class TradeAnalysis {
       );
 
       this.sma20 = laggingSimpleMovingAverage(this.closes, 4);
+      this.sma1stDerivative = movingDerivative(this.sma20, 1);
+      this.sma2ndDerivative = movingSecondDerivative(this.sma20, 1);
 
       this.isBearish = new Array<boolean>(this.candlestickCount);
       for(let i = 0; i < this.isBearish.length; i++) {
@@ -96,6 +112,27 @@ class TradeAnalysis {
 
   get candlestickCount() {
     return this.opens.length;
+  }
+
+  private calculateHeikinAshiCandlesticks() {
+    this.heikinOpens = new Array<number>(this.candlestickCount);
+    this.heikinHighs = new Array<number>(this.candlestickCount);
+    this.heikinLows = new Array<number>(this.candlestickCount);
+    this.heikinCloses = new Array<number>(this.candlestickCount);
+
+    if(this.candlestickCount === 0) { return; }
+
+    this.heikinOpens[0] = this.opens[0];
+    this.heikinHighs[0] = this.highs[0];
+    this.heikinLows[0] = this.lows[0];
+    this.heikinCloses[0] = this.closes[0];
+    
+    for(let i = 1; i < this.candlestickCount; i++) {
+      this.heikinCloses[i] = (this.opens[i] + this.highs[i] + this.lows[i] + this.closes[i]) / 4;
+      this.heikinOpens[i] = (this.heikinOpens[i - 1] + this.heikinCloses[i - 1]) / 2;
+      this.heikinHighs[i] = Math.max(this.highs[i], this.heikinOpens[i], this.heikinCloses[i]);
+      this.heikinLows[i] = Math.min(this.lows[i], this.heikinOpens[i], this.heikinCloses[i]);
+    }
   }
 }
 
@@ -225,6 +262,10 @@ function strokePolyline(context2d: CanvasRenderingContext2D, points: Vector2[], 
 
 interface CandlestickChartProps {
   tradeAnalysis: TradeAnalysis | null;
+  opens: number[];
+  highs: number[];
+  lows: number[];
+  closes: number[];
 }
 class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
@@ -240,11 +281,11 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 
   get minPrice(): number {
     if (!this.props.tradeAnalysis) { return 0; }
-    return Math.min(...this.props.tradeAnalysis.lows);
+    return Math.min(...this.props.lows);
   }
   get maxPrice(): number {
     if (!this.props.tradeAnalysis) { return 0; }
-    return Math.max(...this.props.tradeAnalysis.highs);
+    return Math.max(...this.props.highs);
   }
 
   iFromRightToI(iFromRight: number): number {
@@ -274,10 +315,10 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
     const i = this.iFromRightToI(iFromRight);
     const columnX = this.iFromRightToColumnX(iFromRight);
 
-    const open = this.props.tradeAnalysis.opens[i];
-    const high = this.props.tradeAnalysis.highs[i];
-    const low = this.props.tradeAnalysis.lows[i];
-    const close = this.props.tradeAnalysis.closes[i];
+    const open = this.props.opens[i];
+    const high = this.props.highs[i];
+    const low = this.props.lows[i];
+    const close = this.props.closes[i];
 
     const fillStyle = (close > open) ? "green" : "red";
 
@@ -317,10 +358,10 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         const i = this.iFromRightToI(iFromRight);
         const columnX = this.iFromRightToColumnX(iFromRight);
 
-        const high = this.props.tradeAnalysis.highs[i];
+        const high = this.props.highs[i];
         const wickTop = this.priceToY(high);
 
-        const low = this.props.tradeAnalysis.lows[i];
+        const low = this.props.lows[i];
         const wickBottom = this.priceToY(low);
 
         const circleRadius = (this.columnWidth / 2) - this.columnHorizontalPadding;
@@ -379,6 +420,7 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
 }
 
 interface HistogramChartProps {
+  chartTitle: string;
   values: number[];
   colors: string[];
 }
@@ -411,7 +453,7 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
     this.context2d.clearRect(0, 0, this.width, this.height);
 
     if (this.props.values) {
-      // draw candlesticks
+      // draw bars
       const rightmostColumnX = this.width - this.columnWidth;
       const rightmostCandlestickIndex = this.props.values.length - 1;
   
@@ -434,6 +476,9 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
         // body
         fillRect(this.context2d, new Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
       }
+
+      // draw chart title
+      fillText(this.context2d, this.props.chartTitle, new Vector2(10, 10), "rgb(0, 0, 0)");
     }
   }
 
@@ -457,6 +502,7 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
 }
 
 interface LineChartProps {
+  chartTitle: string;
   values: number[];
 }
 class LineChart extends React.Component<LineChartProps, {}> {
@@ -511,6 +557,9 @@ class LineChart extends React.Component<LineChartProps, {}> {
 
     const polyline = this.getPolyline();
     strokePolyline(this.context2d, polyline, "rgb(0, 0, 0)");
+    
+    // draw chart title
+    fillText(this.context2d, this.props.chartTitle, new Vector2(10, 10), "rgb(0, 0, 0)");
   }
 
   componentDidMount() {
@@ -809,6 +858,43 @@ class App extends React.Component<{}, AppState> {
   componentWillUnmount() {
     clearInterval(this.refreshCandlesticksIntervalHandle);
   }
+  renderCharts() {
+    if(!this.state.tradeAnalysis) { return null; }
+
+    const useHeikinAshiCandlesticks = true;
+
+    const opens = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.opens : this.state.tradeAnalysis.heikinOpens;
+    const highs = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.highs : this.state.tradeAnalysis.heikinHighs;
+    const lows = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.lows : this.state.tradeAnalysis.heikinLows;
+    const closes = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.closes : this.state.tradeAnalysis.heikinCloses;
+
+    const candlestickColors = this.state.tradeAnalysis
+      ? combineArrays(
+          opens,
+          closes,
+          (open, close) => (close > open) ? "green" : "red"
+        )
+      : [];
+
+      return (
+        <div>
+          <CandleStickChart
+            tradeAnalysis={this.state.tradeAnalysis}
+            opens={opens}
+            highs={highs}
+            lows={lows}
+            closes={closes}
+            />
+          <HistogramChart chartTitle="Volume" values={this.state.tradeAnalysis.volumes} colors={candlestickColors} />
+
+          <LineChart chartTitle="SMA 1st d/dt" values={this.state.tradeAnalysis.sma1stDerivative} />
+          <LineChart chartTitle="SMA 2nd d/dt" values={this.state.tradeAnalysis.sma2ndDerivative} />
+
+          <LineChart chartTitle="Lin. Reg. % Close Slope" values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes} />
+          <LineChart chartTitle="Lin. Reg. % Close Slope Concavity" values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity} />
+        </div>
+      );
+  }
   render() {
     const onTwilioAccountSidChange = this.onTwilioAccountSidChange.bind(this);
     const onTwilioAuthTokenChange = this.onTwilioAuthTokenChange.bind(this);
@@ -816,13 +902,6 @@ class App extends React.Component<{}, AppState> {
     const onToPhoneNumberChange = this.onToPhoneNumberChange.bind(this);
     const onSaveSettings = this.onSaveSettings.bind(this);
     const onSendTestTextClick = this.onSendTestTextClick.bind(this);
-    const candlestickColors = this.state.tradeAnalysis
-      ? combineArrays(
-          this.state.tradeAnalysis.opens,
-          this.state.tradeAnalysis.closes,
-          (open, close) => (close > open) ? "green" : "red"
-        )
-      : [];
 
     return (
       <div className="App">
@@ -842,10 +921,7 @@ class App extends React.Component<{}, AppState> {
           <button onClick={onSaveSettings}>Save Settings</button>
           <button onClick={onSendTestTextClick}>Send Test Text</button>
         </div>
-        <CandleStickChart tradeAnalysis={this.state.tradeAnalysis} />
-        {this.state.tradeAnalysis ? <HistogramChart values={this.state.tradeAnalysis.volumes} colors={candlestickColors} /> : null}
-        {this.state.tradeAnalysis ? <LineChart values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes} /> : null}
-        {this.state.tradeAnalysis ? <LineChart values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity} /> : null}
+        {this.renderCharts()}
       </div>
     );
   }
