@@ -915,7 +915,7 @@ class App extends React.Component<{}, AppState> {
     }
 
     if(settings && settings.geminiApiKey) {
-      loadGeminiBalances(this.state.geminiApiKey, this.state.geminiApiSecret);
+      loadGeminiBalances(settings.geminiApiKey, settings.geminiApiSecret);
     }
 
     this.keyDownEventHandler = this.onKeyDown.bind(this);
@@ -1111,7 +1111,7 @@ function nextNonce(): number {
 function loadGeminiBalances(apiKey: string, apiSecret: string) {
   const payload = {
     request: "/v1/balances",
-    nonce: nextNonce.toString()
+    nonce: nextNonce()
   };
 
   return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/balances", payload)
@@ -1129,10 +1129,12 @@ function loadGeminiBalances(apiKey: string, apiSecret: string) {
 function callGeminiPrivateApi(apiKey: string, apiSecret: string, url: string, payload: any) {
   const jsonPayload = JSON.stringify(payload);
   const base64JsonPayload = btoa(jsonPayload);
-  const hashedSignatureBytes = HmacSHA384(apiSecret, base64JsonPayload);
+  const hashedSignatureBytes = HmacSHA384(base64JsonPayload, apiSecret);
   const signature = enc.Hex.stringify(hashedSignatureBytes);
 
-  return fetch(url, {
+  const proxyUrl = "http://localhost:8080/" + url;
+
+  return fetch(proxyUrl, {
     method: "POST",
     headers: {
       "X-GEMINI-APIKEY": apiKey,
