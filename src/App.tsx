@@ -762,6 +762,9 @@ function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1,
 interface AppState {
   tradeAnalysis: TradeAnalysis | null;
 
+  usdBalance: number;
+  ethBalance: number;
+
   geminiApiKey: string;
   geminiApiSecret: string;
 
@@ -787,6 +790,9 @@ class App extends React.Component<{}, AppState> {
 
     this.state = {
       tradeAnalysis: null,
+
+      usdBalance: 0,
+      ethBalance: 0,
 
       geminiApiKey: "",
       geminiApiSecret: "",
@@ -915,7 +921,13 @@ class App extends React.Component<{}, AppState> {
     }
 
     if(settings && settings.geminiApiKey) {
-      loadGeminiBalances(settings.geminiApiKey, settings.geminiApiSecret);
+      loadGeminiBalances(settings.geminiApiKey, settings.geminiApiSecret)
+        .then(json => {
+          this.setState({
+            usdBalance: json.USD,
+            ethBalance: json.ETH
+          });
+        });
     }
 
     this.keyDownEventHandler = this.onKeyDown.bind(this);
@@ -1027,6 +1039,7 @@ class App extends React.Component<{}, AppState> {
 
     return (
       <div className="App">
+        <p>USD: {this.state.usdBalance} ETH: {this.state.ethBalance}</p>
         {this.state.tradeAnalysis ? <p>Last: {this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1]}</p> : null}
         {this.renderCharts()}
         <div>
@@ -1123,7 +1136,13 @@ function loadGeminiBalances(apiKey: string, apiSecret: string) {
 
       return response.json();
     }).then(json => {
-      console.log(json);
+      const findBalanceObj = (currency: string) => (json as Array<any>).find(balanceObj => balanceObj.currency === currency);
+      
+      return {
+        USD: findBalanceObj("USD").available,
+        BTC: findBalanceObj("BTC").available,
+        ETH: findBalanceObj("ETH").available
+      };
     });
 }
 function callGeminiPrivateApi(apiKey: string, apiSecret: string, url: string, payload: any) {
