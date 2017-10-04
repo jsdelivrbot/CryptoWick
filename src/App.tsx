@@ -765,6 +765,9 @@ interface AppState {
   usdBalance: number;
   ethBalance: number;
 
+  buyUsdAmount: string;
+  sellEthAmount: string;
+
   geminiApiKey: string;
   geminiApiSecret: string;
 
@@ -794,6 +797,9 @@ class App extends React.Component<{}, AppState> {
       usdBalance: 0,
       ethBalance: 0,
 
+      buyUsdAmount: "",
+      sellEthAmount: "",
+
       geminiApiKey: "",
       geminiApiSecret: "",
 
@@ -804,6 +810,38 @@ class App extends React.Component<{}, AppState> {
 
       scrollOffsetInColumns: 0
     };
+  }
+
+  onBuyUsdAmountChange(event: any) {
+    this.setState({ buyUsdAmount: event.target.value });
+  }
+  onBuyEth() {
+    if(!this.state.tradeAnalysis) { return; }
+
+    const lastPrice = this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1];
+
+    const buyEthAmount = parseFloat((parseFloat(this.state.buyUsdAmount) / lastPrice).toFixed(5));
+    if(isNaN(buyEthAmount)) { return; }
+
+    const price = lastPrice * 2;
+
+    buyEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", buyEthAmount, price);
+  }
+
+  onSellEthAmountChange(event: any) {
+    this.setState({ sellEthAmount: event.target.value });
+  }
+  onSellEth() {
+    if(!this.state.tradeAnalysis) { return; }
+
+    const lastPrice = this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1];
+    
+    const sellEthAmount = parseFloat(this.state.sellEthAmount);
+    if(isNaN(sellEthAmount)) { return; }
+
+    const price = lastPrice / 2;
+
+    sellEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", sellEthAmount, price);
   }
 
   onGeminiApiKeyChange(event: any) {
@@ -938,15 +976,22 @@ class App extends React.Component<{}, AppState> {
 
     clearInterval(this.refreshCandlesticksIntervalHandle);
   }
+
   renderCharts() {
     if(!this.state.tradeAnalysis) { return null; }
 
-    const useHeikinAshiCandlesticks = false;
+    const useHeikinAshiCandlesticks = true;
 
     const opens = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.opens : this.state.tradeAnalysis.heikinOpens;
     const highs = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.highs : this.state.tradeAnalysis.heikinHighs;
     const lows = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.lows : this.state.tradeAnalysis.heikinLows;
     const closes = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.closes : this.state.tradeAnalysis.heikinCloses;
+
+    const heikinAshiCandlestickHeights = combineArrays(
+      this.state.tradeAnalysis.heikinOpens,
+      this.state.tradeAnalysis.heikinCloses,
+      (a, b) => b - a
+    );
 
     const candlestickColors = this.state.tradeAnalysis
       ? combineArrays(
@@ -980,6 +1025,16 @@ class App extends React.Component<{}, AppState> {
           chartTitle="Volume"
           values={this.state.tradeAnalysis.volumes}
           colors={candlestickColors}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+        
+        <LineChart
+          chartTitle="Heikin-Ashi Candlestick Body Heights"
+          values={heikinAshiCandlestickHeights}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -1028,6 +1083,10 @@ class App extends React.Component<{}, AppState> {
     );
   }
   render() {
+    const onBuyEth = this.onBuyEth.bind(this);
+    const onSellEth = this.onSellEth.bind(this);
+    const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
+    const onSellEthAmountChange = this.onSellEthAmountChange.bind(this);
     const onGeminiApiKeyChange = this.onGeminiApiKeyChange.bind(this);
     const onGeminiApiSecretChange = this.onGeminiApiSecretChange.bind(this);
     const onTwilioAccountSidChange = this.onTwilioAccountSidChange.bind(this);
@@ -1041,26 +1100,51 @@ class App extends React.Component<{}, AppState> {
       <div className="App">
         <p>USD: {this.state.usdBalance} ETH: {this.state.ethBalance}</p>
         {this.state.tradeAnalysis ? <p>Last: {this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1]}</p> : null}
+        <div>
+          <div>
+            Buy USD Amount
+            <input type="text" value={this.state.buyUsdAmount} onChange={onBuyUsdAmountChange} />
+            <button onClick={onBuyEth}>Buy</button>
+          </div>
+
+          <div>
+            Sell ETH Amount
+            <input type="text" value={this.state.sellEthAmount} onChange={onSellEthAmountChange} />
+            <button onClick={onSellEth}>Sell</button>
+          </div>
+        </div>
         {this.renderCharts()}
         <div>
-          Twilio Account SID
-          <input type="text" value={this.state.twilioAccountSid} onChange={onTwilioAccountSidChange} />
+          <div>
+            Twilio Account SID
+            <input type="text" value={this.state.twilioAccountSid} onChange={onTwilioAccountSidChange} />
+          </div>
 
-          Twilio Auth Token
-          <input type="text" value={this.state.twilioAuthToken} onChange={onTwilioAuthTokenChange} />
+          <div>
+            Twilio Auth Token
+            <input type="text" value={this.state.twilioAuthToken} onChange={onTwilioAuthTokenChange} />
+          </div>
 
-          From
-          <input type="text" value={this.state.fromPhoneNumber} onChange={onFromPhoneNumberChange} />
+          <div>
+            From
+            <input type="text" value={this.state.fromPhoneNumber} onChange={onFromPhoneNumberChange} />
+          </div>
 
-          To
-          <input type="text" value={this.state.toPhoneNumber} onChange={onToPhoneNumberChange} />
+          <div>
+            To
+            <input type="text" value={this.state.toPhoneNumber} onChange={onToPhoneNumberChange} />
+          </div>
         </div>
         <div>
-          Gemini Public Key
-          <input type="text" value={this.state.geminiApiKey} onChange={onGeminiApiKeyChange} />
+          <div>
+            Gemini Public Key
+            <input type="text" value={this.state.geminiApiKey} onChange={onGeminiApiKeyChange} />
+          </div>
 
-          Gemini Private Key
-          <input type="text" value={this.state.geminiApiSecret} onChange={onGeminiApiSecretChange} />
+          <div>
+            Gemini Private Key
+            <input type="text" value={this.state.geminiApiSecret} onChange={onGeminiApiSecretChange} />
+          </div>
         </div>
         <div>
           <button onClick={onSaveSettings}>Save Settings</button>
@@ -1145,6 +1229,31 @@ function loadGeminiBalances(apiKey: string, apiSecret: string) {
       };
     });
 }
+function buyEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
+  geminiNewOrder(apiKey, apiSecret, symbol, "buy", amount, price);
+}
+function sellEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
+  geminiNewOrder(apiKey, apiSecret, symbol, "sell", amount, price);
+}
+function geminiNewOrder(apiKey: string, apiSecret: string, symbol: string, side: string, amount: number, price: number) {
+  const nonce = nextNonce();
+  const clientOrderId = nonce.toString();
+
+  const payload = {
+    request: "/v1/order/new",
+    nonce: nonce,
+    client_order_id: clientOrderId,
+    symbol: symbol,
+    amount: amount.toString(),
+    price: price.toString(),
+    side: side,
+    type: "exchange limit",
+    options: ["immediate-or-cancel"]
+  };
+
+  return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/order/new", payload);
+}
+
 function callGeminiPrivateApi(apiKey: string, apiSecret: string, url: string, payload: any) {
   const jsonPayload = JSON.stringify(payload);
   const base64JsonPayload = btoa(jsonPayload);
