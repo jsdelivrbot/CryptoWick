@@ -63,8 +63,6 @@ class TradeAnalysis {
   sma1stDerivative: number[];
   sma2ndDerivative: number[];
 
-  isBearish: boolean[];
-
   constructor(
     securitySymbol: string,
     exchangeName: string,
@@ -100,15 +98,6 @@ class TradeAnalysis {
       this.sma20 = laggingSimpleMovingAverage(this.closes, 8);
       this.sma1stDerivative = movingDerivative(this.sma20, 1);
       this.sma2ndDerivative = movingSecondDerivative(this.sma20, 1);
-
-      this.isBearish = new Array<boolean>(this.candlestickCount);
-      for(let i = 0; i < this.isBearish.length; i++) {
-        const isRed = this.closes[i] < this.opens[i];
-        const slopeIsNegative = this.lineOfBestFitPercentCloseSlopes[i] < 0;
-        const concaveDown = this.lineOfBestFitPercentCloseSlopeConcavity[i] < 0;
-
-        this.isBearish[i] = isRed && slopeIsNegative && concaveDown;
-      }
   }
 
   get candlestickCount() {
@@ -133,6 +122,43 @@ class TradeAnalysis {
       this.heikinOpens[i] = (this.heikinOpens[i - 1] + this.heikinCloses[i - 1]) / 2;
       this.heikinHighs[i] = Math.max(this.highs[i], this.heikinOpens[i], this.heikinCloses[i]);
       this.heikinLows[i] = Math.min(this.lows[i], this.heikinOpens[i], this.heikinCloses[i]);
+    }
+  }
+}
+
+class TradingAlgorithmState {
+  isInTrade: boolean;
+  stopLossPrice: number;
+  minTakeProfitPrice: number;
+  trailingStopLossPrice: number;
+}
+
+function updateTradingAlgorithm(state: TradingAlgorithmState, tradeAnalysis: TradeAnalysis, curCandlestickIndex: number) {
+  const curPrice = tradeAnalysis.closes[curCandlestickIndex];
+
+  if(!state.isInTrade) {
+    // look for entry
+    if(curCandlestickIndex === 0) { return; }
+
+    const isLastCandlestickBearish = tradeAnalysis.heikinCloses[curCandlestickIndex - 1] < tradeAnalysis.heikinOpens[curCandlestickIndex - 1];
+    const isCurCandlestickBullish = tradeAnalysis.heikinCloses[curCandlestickIndex] > tradeAnalysis.heikinOpens[curCandlestickIndex];
+
+    if(isLastCandlestickBearish && isCurCandlestickBullish) {
+      const stopLossDropPercent = 1 / 100;
+      const minTakeProfitRisePercent = 1 / 100;
+
+      state.stopLossPrice = (1 - stopLossDropPercent) * curPrice;
+      state.minTakeProfitPrice = (1 + minTakeProfitRisePercent) * curPrice;
+      state.trailingStopLossPrice = state.stopLossPrice;
+
+      state.isInTrade = true;
+    }
+  } else {
+    if(curPrice <= state.trailingStopLossPrice) {
+      state.isInTrade = false;
+    } else if(curPrice >= state.minTakeProfitPrice) {
+      const trailingStopLossPercentLag = 1 / 100;
+      state.trailingStopLossPrice = Math.max((1 - trailingStopLossPercentLag) * curPrice, state.minTakeProfitPrice);
     }
   }
 }
@@ -272,13 +298,15 @@ interface CandlestickChartProps {
   highs: number[];
   lows: number[];
   closes: number[];
+  areBullish?: boolean[];
+  areBearish?: boolean[];
   width: number;
   height: number;
   columnWidth: number;
   columnHorizontalPadding: number;
   scrollOffsetInColumns: number;
 }
-class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
+class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
 
@@ -371,18 +399,13 @@ class CandleStickChart extends React.Component<CandlestickChartProps, {}> {
         const circleX = columnX + (this.props.columnWidth / 2);
         const circleYMarginFromWick = circleRadius + MARKER_VERTICAL_MARGIN;
         const fillStyle = "black";
-        
-        /*if (this.props.tradeAnalysis.isLocalMinima[i]) {
+
+        if(this.props.areBullish && this.props.areBullish[i]) {
           const circlePos = new Vector2(circleX, wickBottom + circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
 
-        if (this.props.tradeAnalysis.isLocalMaxima[i]) {
-          const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
-          fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
-        }*/
-
-        if (this.props.tradeAnalysis.isBearish[i]) {
+        if(this.props.areBearish && this.props.areBearish[i]) {
           const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
           fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
@@ -776,6 +799,7 @@ interface AppState {
   fromPhoneNumber: string;
   toPhoneNumber: string;
 
+  showHeikinAshiCandlesticks: boolean;
   scrollOffsetInColumns: number;
 }
 
@@ -785,6 +809,10 @@ const ARROW_RIGHT_KEY_CODE = 39;
 class App extends React.Component<{}, AppState> {
   refreshCandlesticksIntervalHandle: number;
   refreshIntervalSeconds = 30;
+
+  tradingAlgoState = new TradingAlgorithmState();
+  entryPointOpenTimes = new Array<number>();
+  exitPointOpenTimes = new Array<number>();
   
   keyDownEventHandler: (event: KeyboardEvent) => void;
 
@@ -808,6 +836,7 @@ class App extends React.Component<{}, AppState> {
       fromPhoneNumber: "+1",
       toPhoneNumber: "+1",
 
+      showHeikinAshiCandlesticks: true,
       scrollOffsetInColumns: 0
     };
   }
@@ -910,8 +939,21 @@ class App extends React.Component<{}, AppState> {
           tradeAnalysis: tradeAnalysis
         });
 
-        //const isEntrySignal = tradeAnalysis.isLocalMinima[tradeAnalysis.candlestickCount - 1];
-        const isEntrySignal = false;
+        if(lastOpenTime === null) {
+          for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
+            const wasInTrade = this.tradingAlgoState.isInTrade;
+            updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i);
+            if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
+            if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
+          }
+        }
+
+        const wasInTrade = this.tradingAlgoState.isInTrade;
+        updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1);
+        if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(mostRecentOpenTime); }
+        if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(mostRecentOpenTime); }
+
+        /*const isEntrySignal = false;
         if (isEntrySignal && this.state.twilioAccountSid) {
           sendTextWithTwilio(
             this.state.twilioAccountSid,
@@ -931,7 +973,7 @@ class App extends React.Component<{}, AppState> {
             this.state.toPhoneNumber,
             "Exit signal."
           );
-        }
+        }*/
       }
     });
   }
@@ -980,7 +1022,7 @@ class App extends React.Component<{}, AppState> {
   renderCharts() {
     if(!this.state.tradeAnalysis) { return null; }
 
-    const useHeikinAshiCandlesticks = true;
+    const useHeikinAshiCandlesticks = this.state.showHeikinAshiCandlesticks;
 
     const opens = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.opens : this.state.tradeAnalysis.heikinOpens;
     const highs = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.highs : this.state.tradeAnalysis.heikinHighs;
@@ -992,6 +1034,16 @@ class App extends React.Component<{}, AppState> {
       this.state.tradeAnalysis.heikinCloses,
       (a, b) => b - a
     );
+
+    let areEntryPoints = new Array<boolean>(this.state.tradeAnalysis.candlestickCount);
+    for(let i = 0; i < this.state.tradeAnalysis.candlestickCount; i++) {
+      areEntryPoints[i] = this.entryPointOpenTimes.indexOf(this.state.tradeAnalysis.openTimes[i]) >= 0;
+    }
+
+    let areExitPoints = new Array<boolean>(this.state.tradeAnalysis.candlestickCount);
+    for(let i = 0; i < this.state.tradeAnalysis.candlestickCount; i++) {
+      areExitPoints[i] = this.exitPointOpenTimes.indexOf(this.state.tradeAnalysis.openTimes[i]) >= 0;
+    }
 
     const candlestickColors = this.state.tradeAnalysis
       ? combineArrays(
@@ -1008,7 +1060,7 @@ class App extends React.Component<{}, AppState> {
 
     return (
       <div>
-        <CandleStickChart
+        <CandlestickChart
           tradeAnalysis={this.state.tradeAnalysis}
           opens={opens}
           highs={highs}
@@ -1016,6 +1068,8 @@ class App extends React.Component<{}, AppState> {
           closes={closes}
           width={800}
           height={300}
+          areBullish={areEntryPoints}
+          areBearish={areExitPoints}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
@@ -1031,8 +1085,11 @@ class App extends React.Component<{}, AppState> {
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
         />
-        
-        <LineChart
+      </div>
+    );
+
+    /*
+    <LineChart
           chartTitle="Heikin-Ashi Candlestick Body Heights"
           values={heikinAshiCandlestickHeights}
           width={800}
@@ -1079,8 +1136,7 @@ class App extends React.Component<{}, AppState> {
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
         />
-      </div>
-    );
+    */
   }
   render() {
     const onBuyEth = this.onBuyEth.bind(this);
