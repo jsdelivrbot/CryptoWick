@@ -4,6 +4,9 @@ import "./App.css";
 
 //const logo = require("./logo.svg");
 
+const ARROW_LEFT_KEY_CODE = 37;
+const ARROW_RIGHT_KEY_CODE = 39;
+
 function assert(condition: boolean) {
   if (!condition) {
     throw new Error(`Failed assertion.`);
@@ -133,7 +136,13 @@ class TradingAlgorithmState {
   trailingStopLossPrice: number;
 }
 
-function updateTradingAlgorithm(state: TradingAlgorithmState, tradeAnalysis: TradeAnalysis, curCandlestickIndex: number) {
+function updateTradingAlgorithm(
+  state: TradingAlgorithmState,
+  tradeAnalysis: TradeAnalysis,
+  curCandlestickIndex: number,
+  tryBuy: () => boolean,
+  trySell: () => boolean
+) {
   const curPrice = tradeAnalysis.closes[curCandlestickIndex];
 
   if(!state.isInTrade) {
@@ -151,11 +160,15 @@ function updateTradingAlgorithm(state: TradingAlgorithmState, tradeAnalysis: Tra
       state.minTakeProfitPrice = (1 + minTakeProfitRisePercent) * curPrice;
       state.trailingStopLossPrice = state.stopLossPrice;
 
-      state.isInTrade = true;
+      if(tryBuy()) {
+        state.isInTrade = true;
+      }
     }
   } else {
     if(curPrice <= state.trailingStopLossPrice) {
-      state.isInTrade = false;
+      if(trySell()) {
+        state.isInTrade = false;
+      }
     } else if(curPrice >= state.minTakeProfitPrice) {
       const trailingStopLossPercentLag = 1 / 100;
       state.trailingStopLossPrice = Math.max((1 - trailingStopLossPercentLag) * curPrice, state.minTakeProfitPrice);
@@ -373,6 +386,27 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     // wick
     fillRect(this.context2d, new Vector2(wickLeft, wickTop), 1, wickHeight, fillStyle);
   }
+  drawLinearRegressionLine(windowSize: number) {
+    if (this.context2d === null) { return; }
+    if (this.props.closes.length < windowSize) { return; }
+
+    const linRegPoints = generateArray(windowSize, iFromStart => {
+      const i = (this.props.closes.length - windowSize) + iFromStart;
+      return new Vector2(iFromStart, this.props.closes[i]);
+    });
+    const lineOfBestFit = linearLeastSquares(linRegPoints);
+
+    const lineStartClose = this.props.closes[this.props.closes.length - windowSize];
+    const lineStartPoint = new Vector2(
+      this.iFromRightToColumnX(windowSize - 1, this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2),
+      this.priceToY(lineOfBestFit.b)
+    );
+    const lineEndPoint = new Vector2(
+      this.iFromRightToColumnX(0, this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2),
+      this.priceToY((lineOfBestFit.m * (windowSize - 1)) + lineOfBestFit.b)
+    );
+    strokeLine(this.context2d, lineStartPoint, lineEndPoint, "rgba(0, 0, 0, 0.3)");
+  }
   drawToCanvas() {
     if (this.context2d === null) { return; }
 
@@ -421,7 +455,11 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
             this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2), this.priceToY(value)
         );
       });
-      strokePolyline(this.context2d, smaPoints, "black");
+      //strokePolyline(this.context2d, smaPoints, "black");
+
+      // draw linear regression lines
+      const linRegWindowSizes = [5, 10, 15, 20, 25, 30];
+      linRegWindowSizes.forEach(x => this.drawLinearRegressionLine(x));
 
       // draw chart title
       const chartTitle = `${this.props.tradeAnalysis.securitySymbol} ${this.props.tradeAnalysis.exchangeName} ${this.props.tradeAnalysis.timeframe}`;
@@ -770,6 +808,15 @@ function laggingExponentialMovingAverage(values: number[], lookbacklength: numbe
   return ema;
 }
 
+function generateArray<T>(arrayLength: number, genElementFunc: (index: number) => T): T[] {
+  let array = new Array<T>(arrayLength);
+
+  for(let i = 0; i < arrayLength; i++) {
+    array[i] = genElementFunc(i);
+  }
+
+  return array;
+}
 function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1, e2: T2) => TR): TR[] {
   assert(arr1.length === arr2.length);
 
@@ -803,9 +850,6 @@ interface AppState {
   scrollOffsetInColumns: number;
 }
 
-const ARROW_LEFT_KEY_CODE = 37;
-const ARROW_RIGHT_KEY_CODE = 39;
-
 class App extends React.Component<{}, AppState> {
   refreshCandlesticksIntervalHandle: number;
   refreshIntervalSeconds = 30;
@@ -836,7 +880,7 @@ class App extends React.Component<{}, AppState> {
       fromPhoneNumber: "+1",
       toPhoneNumber: "+1",
 
-      showHeikinAshiCandlesticks: true,
+      showHeikinAshiCandlesticks: false,
       scrollOffsetInColumns: 0
     };
   }
@@ -940,16 +984,38 @@ class App extends React.Component<{}, AppState> {
         });
 
         if(lastOpenTime === null) {
+          const fakeBuyEth = () => true;
+          const fakeSellEth = () => true;
+
           for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
             const wasInTrade = this.tradingAlgoState.isInTrade;
-            updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i);
+            updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i, fakeBuyEth, fakeSellEth);
             if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
             if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
           }
         }
 
+        const tryBuyEth = () => {
+          try {
+            //this.onBuyEth();
+            console.log("Try real buy ETH!");
+            return true;
+          } catch(e) {
+            return false;
+          }
+        };
+        const trySellEth = () => {
+          try {
+            //this.onBuyEth();
+            console.log("Try real sell ETH!");
+            return true;
+          } catch(e) {
+            return false;
+          }
+        };
+
         const wasInTrade = this.tradingAlgoState.isInTrade;
-        updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1);
+        updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyEth, trySellEth);
         if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(mostRecentOpenTime); }
         if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(mostRecentOpenTime); }
 
