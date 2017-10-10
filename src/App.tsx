@@ -968,6 +968,10 @@ class App extends React.Component<{}, AppState> {
     );
   }
 
+  onShowHeikinAshiCandlesticksChange(event: any) {
+    this.setState({ showHeikinAshiCandlesticks: event.target.checked });
+  }
+
   reloadCandlesticks() {
     load15MinCandlesticks("ETH", "USD", "Gemini")
     .then(tradeAnalysis => {
@@ -1217,6 +1221,7 @@ class App extends React.Component<{}, AppState> {
     const onToPhoneNumberChange = this.onToPhoneNumberChange.bind(this);
     const onSaveSettings = this.onSaveSettings.bind(this);
     const onSendTestTextClick = this.onSendTestTextClick.bind(this);
+    const onShowHeikinAshiCandlesticksChange = this.onShowHeikinAshiCandlesticksChange.bind(this);
 
     return (
       <div className="App">
@@ -1235,6 +1240,7 @@ class App extends React.Component<{}, AppState> {
             <button onClick={onSellEth}>Sell</button>
           </div>
         </div>
+        <div><input type="checkbox" checked={this.state.showHeikinAshiCandlesticks} onChange={onShowHeikinAshiCandlesticksChange} /> Show Heikin-Ashi</div>
         {this.renderCharts()}
         <div>
           <div>
