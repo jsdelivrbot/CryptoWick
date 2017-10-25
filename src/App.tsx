@@ -7,36 +7,367 @@ import "./App.css";
 const ARROW_LEFT_KEY_CODE = 37;
 const ARROW_RIGHT_KEY_CODE = 39;
 
-function assert(condition: boolean) {
-  if (!condition) {
-    throw new Error(`Failed assertion.`);
+namespace Debug {
+  export function assert(condition: boolean) {
+    if (!condition) {
+      throw new Error(`Failed assertion.`);
+    }
   }
 }
 
-function sendTextWithTwilio(
-  accountSid: string,
-  authToken: string,
-  fromPhoneNumber: string,
-  toPhoneNumber: string,
-  message: string) {
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages`;
-
-  let postBody = new FormData();
-  postBody.append("From", fromPhoneNumber);
-  postBody.append("To", toPhoneNumber);
-  postBody.append("Body", message);
-
-  return fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Basic ${btoa(accountSid + ":" + authToken)}`
-    },
-    body: postBody
-  });
+namespace SMS {
+  export function sendTextWithTwilio(
+    accountSid: string,
+    authToken: string,
+    fromPhoneNumber: string,
+    toPhoneNumber: string,
+    message: string) {
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages`;
+  
+    let postBody = new FormData();
+    postBody.append("From", fromPhoneNumber);
+    postBody.append("To", toPhoneNumber);
+    postBody.append("Body", message);
+  
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${btoa(accountSid + ":" + authToken)}`
+      },
+      body: postBody
+    });
+  }
 }
 
-class Vector2 {
-  constructor(public x: number, public y: number) {}
+namespace Maths {
+  export class Vector2 {
+    constructor(public x: number, public y: number) {}
+  }
+
+  export class LinearLeastSquaresResult {
+    m: number;
+    b: number;
+    r2: number;
+  }
+  export function linearLeastSquares(points: Maths.Vector2[]): LinearLeastSquaresResult {
+    Debug.assert(points != null);
+    Debug.assert(points.length >= 2);
+  
+    let Sx = 0;
+    for(let i = 0; i < points.length; i++) { Sx += points[i].x; }
+  
+    let Sy = 0;
+    for (let i = 0; i < points.length; i++) { Sy += points[i].y; }
+  
+    let Sxy = 0;
+    for (let i = 0; i < points.length; i++) { Sxy += (points[i].x * points[i].y); }
+  
+    let Sxx = 0;
+    for (let i = 0; i < points.length; i++) { Sxx += (points[i].x * points[i].x); }
+  
+    let Syy = 0;
+    for (let i = 0; i < points.length; i++) { Syy += (points[i].y * points[i].y); }
+  
+    const SxSx = Sx * Sx;
+    const n = points.length;
+  
+    let regressionLine = new LinearLeastSquaresResult();
+    let denominator = ((n * Sxx) - SxSx);
+    regressionLine.b = ((Sy * Sxx) - (Sx * Sxy)) / denominator;
+    regressionLine.m = ((n * Sxy) - (Sx * Sy)) / denominator;
+  
+    const r = ((n * Sxy) - (Sx * Sy)) / (Math.sqrt(((n * Sxx) - (Sx * Sx))) * Math.sqrt(((n * Syy) - (Sy * Sy))));
+  
+    regressionLine.r2 = r * r;
+  
+    return regressionLine;
+  }
+  export function movingDerivative(values: number[], h: number): number[] {
+    Debug.assert(values !== null);
+    Debug.assert(h > 0);
+  
+    if (values.length < 2) { return new Array<number>(values.length); }
+  
+    const lastIndex = values.length - 1;
+    return values.map((value, index) => {
+        if (index === 0) {
+            // forward difference
+            return (values[index + 1] - values[index]) / h;
+        } else if (index === lastIndex) {
+            // backward difference
+            return (values[index] - values[index - 1]) / h;
+        } else {
+            // central difference
+            return (values[index + 1] - values[index - 1]) / (2 * h);
+        }
+    });
+  }
+  export function movingSecondDerivative(values: number[], h: number): number[] {
+    Debug.assert(values !== null);
+    Debug.assert(h > 0);
+  
+    if (values.length < 3) { return new Array<number>(values.length); }
+  
+    const lastIndex = values.length - 1;
+    const hSquared = h * h;
+    return values.map((value, index) => {
+        if (index === 0) {
+            // forward
+            return (values[index + 2] - (2 * values[index + 1]) + values[index]) / hSquared;
+        } else if (index === lastIndex) {
+            // backward
+            return (values[index] - (2 * values[index - 1]) + values[index - 2]) / hSquared;
+        } else {
+            // central
+            return (values[index + 1] - (2 * values[index]) + values[index - 1]) / hSquared;
+        }
+    });
+  }
+  export function mean(values: number[]): number {
+    let valueSum = 0;
+    
+    for(let i = 0; i < values.length; i++) {
+        valueSum += values[i];
+    }
+  
+    return valueSum / values.length;
+  }
+  export function meanArraySlice(values: number[], startIndex: number, valueCount: number): number {
+    Debug.assert(values !== null);
+    Debug.assert(valueCount >= 1);
+    Debug.assert((startIndex + valueCount) <= values.length);
+  
+    let valueSum = 0;
+  
+    const endIndexExclusive = startIndex + valueCount;
+    for (let i = startIndex; i < endIndexExclusive; i++) {
+        valueSum += values[i];
+    }
+  
+    return valueSum / valueCount;
+  }
+  export function laggingSimpleMovingAverage(values: number[], lookbacklength: number): number[] {
+    Debug.assert(values !== null);
+    Debug.assert(lookbacklength > 0);
+  
+    return values.map((value, currentValueIndex) => {
+        const firstValueIndex = Math.max(currentValueIndex - (lookbacklength - 1), 0);
+        const valueCount = (currentValueIndex - firstValueIndex) + 1;
+  
+        return meanArraySlice(values, firstValueIndex, valueCount);
+    });
+  }
+  export function laggingExponentialMovingAverage(values: number[], lookbacklength: number): number[] {
+    Debug.assert(values !== null);
+    Debug.assert(lookbacklength > 0);
+  
+    if(values.length === 0) { return new Array<number>(0); }
+  
+    const alpha = 2.0 / (lookbacklength + 1); // smoothing factor
+    let ema = new Array<number>(values.length);
+  
+    ema[0] = values[0];
+  
+    for(let i = 1; i < values.length; i++) {
+        ema[i] = ((1.0 - alpha) * ema[i - 1]) + (alpha * values[i]);
+    }
+  
+    return ema;
+  }
+}
+
+namespace Graphics {
+  export function fillRect(
+    context2d: CanvasRenderingContext2D,
+    position: Maths.Vector2,
+    width: number, height: number,
+    fillStyle: string) {
+      context2d.fillStyle = fillStyle;
+      context2d.fillRect(position.x, position.y, width, height);
+  }
+  export function fillCircle(
+    context2d: CanvasRenderingContext2D,
+    position: Maths.Vector2,
+    radius: number,
+    fillStyle: string) {
+      context2d.beginPath();
+      context2d.arc(position.x, position.y, radius, 0, 2 * Math.PI);
+  
+      context2d.fillStyle = fillStyle;
+      context2d.fill();
+  }
+  export function fillText(context2d: CanvasRenderingContext2D, text: string, position: Maths.Vector2, fillStyle: string) {
+    context2d.fillStyle = fillStyle;
+    context2d.fillText(text, position.x, position.y);
+  }
+  export function strokeLine(context2d: CanvasRenderingContext2D, p1: Maths.Vector2, p2: Maths.Vector2, strokeStyle: string) {
+    context2d.strokeStyle = strokeStyle;
+    context2d.beginPath();
+    context2d.moveTo(p1.x, p1.y);
+    context2d.lineTo(p2.x, p2.y);
+    context2d.stroke();
+  }
+  export function strokePolyline(context2d: CanvasRenderingContext2D, points: Maths.Vector2[], strokeStyle: string) {
+    if(points.length === 0) { return; }
+    
+    context2d.strokeStyle = strokeStyle;
+    context2d.beginPath();
+  
+    for(let i = 0; i < points.length; i++) {
+      const point = points[i];
+      if(i > 0) {
+        context2d.lineTo(point.x, point.y);
+      } else {
+        context2d.moveTo(point.x, point.y);
+      }
+    }
+  
+    context2d.stroke();
+  }
+}
+
+namespace ArrayUtils {
+  export function arraySliceAll<T>(predicate: (x: T) => boolean, array: T[], sliceStartIndex: number, sliceLength: number) {
+    Debug.assert(sliceStartIndex >= 0);
+    Debug.assert((sliceStartIndex + sliceLength) <= array.length);
+  
+    for (let i = sliceStartIndex; i < (sliceStartIndex + sliceLength); i++) {
+      if (!predicate(array[i])) {
+        return false;
+      }
+    }
+  
+    return true;
+  }
+  export function generateArray<T>(arrayLength: number, genElementFunc: (index: number) => T): T[] {
+    let array = new Array<T>(arrayLength);
+  
+    for(let i = 0; i < arrayLength; i++) {
+      array[i] = genElementFunc(i);
+    }
+  
+    return array;
+  }
+  export function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1, e2: T2) => TR): TR[] {
+    Debug.assert(arr1.length === arr2.length);
+  
+    let result = new Array<TR>(arr1.length);
+  
+    for(let i = 0; i < result.length; i++) {
+      result[i] = combineFunc(arr1[i], arr2[i]);
+    }
+  
+    return result;
+  }
+}
+
+namespace Gemini {
+  export function loadGeminiBalances(apiKey: string, apiSecret: string) {
+    const payload = {
+      request: "/v1/balances",
+      nonce: nextNonce()
+    };
+  
+    return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/balances", payload)
+      .then(response => {
+        if (!response.ok) {
+          console.log("Error fetching data from Gemini.");
+          return;
+        }
+  
+        return response.json();
+      }).then(json => {
+        const findBalanceObj = (currency: string) => (json as Array<any>).find(balanceObj => balanceObj.currency === currency);
+        
+        return {
+          USD: findBalanceObj("USD").available,
+          BTC: findBalanceObj("BTC").available,
+          ETH: findBalanceObj("ETH").available
+        };
+      });
+  }
+  export function buyEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
+    geminiNewOrder(apiKey, apiSecret, symbol, "buy", amount, price);
+  }
+  export function sellEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
+    geminiNewOrder(apiKey, apiSecret, symbol, "sell", amount, price);
+  }
+  export function geminiNewOrder(apiKey: string, apiSecret: string, symbol: string, side: string, amount: number, price: number) {
+    const nonce = nextNonce();
+    const clientOrderId = nonce.toString();
+  
+    const payload = {
+      request: "/v1/order/new",
+      nonce: nonce,
+      client_order_id: clientOrderId,
+      symbol: symbol,
+      amount: amount.toString(),
+      price: price.toString(),
+      side: side,
+      type: "exchange limit",
+      options: ["immediate-or-cancel"]
+    };
+  
+    return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/order/new", payload);
+  }
+  
+  export function callGeminiPrivateApi(apiKey: string, apiSecret: string, url: string, payload: any) {
+    const jsonPayload = JSON.stringify(payload);
+    const base64JsonPayload = btoa(jsonPayload);
+    const hashedSignatureBytes = HmacSHA384(base64JsonPayload, apiSecret);
+    const signature = enc.Hex.stringify(hashedSignatureBytes);
+  
+    const proxyUrl = "http://localhost:8080/" + url;
+  
+    return fetch(proxyUrl, {
+      method: "POST",
+      headers: {
+        "X-GEMINI-APIKEY": apiKey,
+        "X-GEMINI-PAYLOAD": base64JsonPayload,
+        "X-GEMINI-SIGNATURE": signature
+      },
+      body: ""
+    });
+  }
+}
+
+namespace CryptoCompare {
+  export function load15MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeName: string): Promise<TradeAnalysis> {
+    const minutesPerCandlestick = 15;
+    return fetch(`https://min-api.cryptocompare.com/data/histominute?fsym=${fromSymbol}&tsym=${toSymbol}&aggregate=${minutesPerCandlestick}&e=${exchangeName}`)
+      .then(response => {
+        if (!response.ok) {
+          console.log("Error fetching data from CryptoWatch.");
+          return;
+        }
+  
+        return response.json();
+      }).then(json => {
+        if ((json.Response !== "Success") || (json.Type < 100)) {
+          console.log(`Error fetching data from CryptoWatch. Response = ${json.Response}, Type = ${json.Type}`);
+        }
+  
+        const candlestickCount: number = json.Data.length;
+        
+        let openTimes = new Array(candlestickCount);
+        let opens = new Array(candlestickCount);
+        let highs = new Array(candlestickCount);
+        let lows = new Array(candlestickCount);
+        let closes = new Array(candlestickCount);
+        let volumes = new Array(candlestickCount);
+  
+        for (let i = 0; i < json.Data.length; i++) {
+          openTimes[i] = json.Data[i].time;
+          opens[i] = json.Data[i].open;
+          highs[i] = json.Data[i].high;
+          lows[i] = json.Data[i].low;
+          closes[i] = json.Data[i].close;
+          volumes[i] = json.Data[i].volumefrom;
+        }
+  
+        return new TradeAnalysis(fromSymbol + toSymbol, exchangeName, `${minutesPerCandlestick}m`, openTimes, opens, highs, lows, closes, volumes);
+      });
+  }
 }
 
 class TradeAnalysis {
@@ -94,13 +425,13 @@ class TradeAnalysis {
       this.isLocalMaxima = areLocalMaxima(2, this.highs);
 
       this.lineOfBestFitPercentCloseSlopes = lineOfBestFitPercentCloseSlopes(this.closes, 8);
-      this.lineOfBestFitPercentCloseSlopeConcavity = movingSecondDerivative(
+      this.lineOfBestFitPercentCloseSlopeConcavity = Maths.movingSecondDerivative(
         this.lineOfBestFitPercentCloseSlopes, 1
       );
 
-      this.sma20 = laggingSimpleMovingAverage(this.closes, 8);
-      this.sma1stDerivative = movingDerivative(this.sma20, 1);
-      this.sma2ndDerivative = movingSecondDerivative(this.sma20, 1);
+      this.sma20 = Maths.laggingSimpleMovingAverage(this.closes, 8);
+      this.sma1stDerivative = Maths.movingDerivative(this.sma20, 1);
+      this.sma2ndDerivative = Maths.movingSecondDerivative(this.sma20, 1);
   }
 
   get candlestickCount() {
@@ -149,10 +480,15 @@ function updateTradingAlgorithm(
     // look for entry
     if(curCandlestickIndex === 0) { return; }
 
-    const isLastCandlestickBearish = tradeAnalysis.heikinCloses[curCandlestickIndex - 1] < tradeAnalysis.heikinOpens[curCandlestickIndex - 1];
-    const isCurCandlestickBullish = tradeAnalysis.heikinCloses[curCandlestickIndex] > tradeAnalysis.heikinOpens[curCandlestickIndex];
-
-    if(isLastCandlestickBearish && isCurCandlestickBullish) {
+    const isBearishMinus2 = tradeAnalysis.heikinCloses[curCandlestickIndex - 2] < tradeAnalysis.heikinOpens[curCandlestickIndex - 2];
+    const isBullishMinus1 = tradeAnalysis.heikinCloses[curCandlestickIndex - 1] > tradeAnalysis.heikinOpens[curCandlestickIndex - 1];
+    
+    const signedBodyHeight = tradeAnalysis.heikinCloses[curCandlestickIndex] - tradeAnalysis.heikinOpens[curCandlestickIndex];
+    const signedBodyHeightPctOfOpen = signedBodyHeight / tradeAnalysis.heikinOpens[curCandlestickIndex];
+    const isGreenNonHeikin = tradeAnalysis.closes[curCandlestickIndex] > tradeAnalysis.opens[curCandlestickIndex];
+    const isBullishEnough = signedBodyHeightPctOfOpen > (0.25 / 100);
+    
+    if(isBearishMinus2 && isBullishMinus1 && isGreenNonHeikin && isBullishEnough) {
       const stopLossDropPercent = 1 / 100;
       const minTakeProfitRisePercent = 1 / 100;
 
@@ -176,22 +512,9 @@ function updateTradingAlgorithm(
   }
 }
 
-function arraySliceAll<T>(predicate: (x: T) => boolean, array: T[], sliceStartIndex: number, sliceLength: number) {
-  assert(sliceStartIndex >= 0);
-  assert((sliceStartIndex + sliceLength) <= array.length);
-
-  for (let i = sliceStartIndex; i < (sliceStartIndex + sliceLength); i++) {
-    if (!predicate(array[i])) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 function areConsecutiveBullishCandlesticks(windowSize: number, opens: number[], closes: number[]): boolean[] {
-  assert(windowSize >= 1);
-  assert(opens.length === closes.length);
+  Debug.assert(windowSize >= 1);
+  Debug.assert(opens.length === closes.length);
 
   const candlestickCount = opens.length;
   let result = new Array(candlestickCount);
@@ -215,22 +538,22 @@ function areConsecutiveBullishCandlesticks(windowSize: number, opens: number[], 
   return result;
 }
 function areLocalMinima(candlestickRadius: number, lows: number[]): boolean[] {
-  assert(candlestickRadius >= 1);
+  Debug.assert(candlestickRadius >= 1);
 
   const windowSize = (2 * candlestickRadius) + 1;
   const maxIndex = lows.length - 1;
   return lows.map((low, index) => ((index >= candlestickRadius) && (index <= (maxIndex - candlestickRadius)))
-    ? arraySliceAll(otherLow => (otherLow >= low), lows, index - candlestickRadius, windowSize)
+    ? ArrayUtils.arraySliceAll(otherLow => (otherLow >= low), lows, index - candlestickRadius, windowSize)
     : false
   );
 }
 function areLocalMaxima(candlestickRadius: number, highs: number[]): boolean[] {
-  assert(candlestickRadius >= 1);
+  Debug.assert(candlestickRadius >= 1);
 
   const windowSize = (2 * candlestickRadius) + 1;
   const maxIndex = highs.length - 1;
   return highs.map((high, index) => ((index >= candlestickRadius) && (index <= (maxIndex - candlestickRadius)))
-    ? arraySliceAll(otherHigh => (otherHigh <= high), highs, index - candlestickRadius, windowSize)
+    ? ArrayUtils.arraySliceAll(otherHigh => (otherHigh <= high), highs, index - candlestickRadius, windowSize)
     : false
   );
 }
@@ -253,54 +576,6 @@ function loadSettings(): Settings | null {
   const settingsJson = localStorage.getItem("settings");
 
   return settingsJson ? JSON.parse(settingsJson) : null;
-}
-
-function fillRect(
-  context2d: CanvasRenderingContext2D,
-  position: Vector2,
-  width: number, height: number,
-  fillStyle: string) {
-    context2d.fillStyle = fillStyle;
-    context2d.fillRect(position.x, position.y, width, height);
-}
-function fillCircle(
-  context2d: CanvasRenderingContext2D,
-  position: Vector2,
-  radius: number,
-  fillStyle: string) {
-    context2d.beginPath();
-    context2d.arc(position.x, position.y, radius, 0, 2 * Math.PI);
-
-    context2d.fillStyle = fillStyle;
-    context2d.fill();
-}
-function fillText(context2d: CanvasRenderingContext2D, text: string, position: Vector2, fillStyle: string) {
-  context2d.fillStyle = fillStyle;
-  context2d.fillText(text, position.x, position.y);
-}
-function strokeLine(context2d: CanvasRenderingContext2D, p1: Vector2, p2: Vector2, strokeStyle: string) {
-  context2d.strokeStyle = strokeStyle;
-  context2d.beginPath();
-  context2d.moveTo(p1.x, p1.y);
-  context2d.lineTo(p2.x, p2.y);
-  context2d.stroke();
-}
-function strokePolyline(context2d: CanvasRenderingContext2D, points: Vector2[], strokeStyle: string) {
-  if(points.length === 0) { return; }
-  
-  context2d.strokeStyle = strokeStyle;
-  context2d.beginPath();
-
-  for(let i = 0; i < points.length; i++) {
-    const point = points[i];
-    if(i > 0) {
-      context2d.lineTo(point.x, point.y);
-    } else {
-      context2d.moveTo(point.x, point.y);
-    }
-  }
-
-  context2d.stroke();
 }
 
 const MARKER_VERTICAL_MARGIN = 5;
@@ -381,31 +656,31 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     const wickHeight = wickBottom - wickTop;
 
     // body
-    fillRect(this.context2d, new Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
+    Graphics.fillRect(this.context2d, new Maths.Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
     
     // wick
-    fillRect(this.context2d, new Vector2(wickLeft, wickTop), 1, wickHeight, fillStyle);
+    Graphics.fillRect(this.context2d, new Maths.Vector2(wickLeft, wickTop), 1, wickHeight, fillStyle);
   }
   drawLinearRegressionLine(windowSize: number) {
     if (this.context2d === null) { return; }
     if (this.props.closes.length < windowSize) { return; }
 
-    const linRegPoints = generateArray(windowSize, iFromStart => {
+    const linRegPoints = ArrayUtils.generateArray(windowSize, iFromStart => {
       const i = (this.props.closes.length - windowSize) + iFromStart;
-      return new Vector2(iFromStart, this.props.closes[i]);
+      return new Maths.Vector2(iFromStart, this.props.closes[i]);
     });
-    const lineOfBestFit = linearLeastSquares(linRegPoints);
+    const lineOfBestFit = Maths.linearLeastSquares(linRegPoints);
 
     const lineStartClose = this.props.closes[this.props.closes.length - windowSize];
-    const lineStartPoint = new Vector2(
+    const lineStartPoint = new Maths.Vector2(
       this.iFromRightToColumnX(windowSize - 1, this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2),
       this.priceToY(lineOfBestFit.b)
     );
-    const lineEndPoint = new Vector2(
+    const lineEndPoint = new Maths.Vector2(
       this.iFromRightToColumnX(0, this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2),
       this.priceToY((lineOfBestFit.m * (windowSize - 1)) + lineOfBestFit.b)
     );
-    strokeLine(this.context2d, lineStartPoint, lineEndPoint, "rgba(0, 0, 0, 0.3)");
+    Graphics.strokeLine(this.context2d, lineStartPoint, lineEndPoint, "rgba(0, 0, 0, 0.3)");
   }
   drawToCanvas() {
     if (this.context2d === null) { return; }
@@ -435,13 +710,13 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
         const fillStyle = "black";
 
         if(this.props.areBullish && this.props.areBullish[i]) {
-          const circlePos = new Vector2(circleX, wickBottom + circleYMarginFromWick);
-          fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
+          const circlePos = new Maths.Vector2(circleX, wickBottom + circleYMarginFromWick);
+          Graphics.fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
 
         if(this.props.areBearish && this.props.areBearish[i]) {
-          const circlePos = new Vector2(circleX, wickTop - circleYMarginFromWick);
-          fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
+          const circlePos = new Maths.Vector2(circleX, wickTop - circleYMarginFromWick);
+          Graphics.fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
         }
       }
 
@@ -450,7 +725,7 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
       const smaPoints = this.props.tradeAnalysis.sma20.map((value, index) => {
         const iFromRight = (candlestickCount - 1) - index;
 
-        return new Vector2(
+        return new Maths.Vector2(
           this.iFromRightToColumnX(iFromRight,
             this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2), this.priceToY(value)
         );
@@ -458,12 +733,12 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
       //strokePolyline(this.context2d, smaPoints, "black");
 
       // draw linear regression lines
-      const linRegWindowSizes = [5, 10, 15, 20, 25, 30];
+      const linRegWindowSizes = [5, 10, 15, 20, 25, 30, 60];
       linRegWindowSizes.forEach(x => this.drawLinearRegressionLine(x));
 
       // draw chart title
       const chartTitle = `${this.props.tradeAnalysis.securitySymbol} ${this.props.tradeAnalysis.exchangeName} ${this.props.tradeAnalysis.timeframe}`;
-      fillText(this.context2d, chartTitle, new Vector2(10, 10), "rgb(0, 0, 0)");
+      Graphics.fillText(this.context2d, chartTitle, new Maths.Vector2(10, 10), "rgb(0, 0, 0)");
     }
   }
 
@@ -546,11 +821,11 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
         const bodyHeight = bodyBottom - bodyTop;
 
         // body
-        fillRect(this.context2d, new Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
+        Graphics.fillRect(this.context2d, new Maths.Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
       }
 
       // draw chart title
-      fillText(this.context2d, this.props.chartTitle, new Vector2(10, 10), "rgb(0, 0, 0)");
+      Graphics.fillText(this.context2d, this.props.chartTitle, new Maths.Vector2(10, 10), "rgb(0, 0, 0)");
     }
   }
 
@@ -610,15 +885,15 @@ class LineChart extends React.Component<LineChartProps, {}> {
 
     return yFromTop;
   }
-  getPolyline(): Vector2[] {
-    let points = new Array<Vector2>(this.props.values.length);
+  getPolyline(): Maths.Vector2[] {
+    let points = new Array<Maths.Vector2>(this.props.values.length);
 
     for (let iFromRight = 0; iFromRight < points.length; iFromRight++) {
       const i = this.iFromRightToI(iFromRight);
       const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
       const value = this.props.values[i];
 
-      const point = new Vector2(columnX + (this.props.columnWidth / 2), this.valueToY(value));
+      const point = new Maths.Vector2(columnX + (this.props.columnWidth / 2), this.valueToY(value));
       points[i] = point;
     }
 
@@ -631,13 +906,13 @@ class LineChart extends React.Component<LineChartProps, {}> {
 
     // draw x-axis
     const xAxisY = this.valueToY(0);
-    strokeLine(this.context2d, new Vector2(0, xAxisY), new Vector2(this.props.width, xAxisY), "rgb(0, 0, 0)");
+    Graphics.strokeLine(this.context2d, new Maths.Vector2(0, xAxisY), new Maths.Vector2(this.props.width, xAxisY), "rgb(0, 0, 0)");
 
     const polyline = this.getPolyline();
-    strokePolyline(this.context2d, polyline, "rgb(0, 0, 0)");
+    Graphics.strokePolyline(this.context2d, polyline, "rgb(0, 0, 0)");
     
     // draw chart title
-    fillText(this.context2d, this.props.chartTitle, new Vector2(10, 10), "rgb(0, 0, 0)");
+    Graphics.fillText(this.context2d, this.props.chartTitle, new Maths.Vector2(10, 10), "rgb(0, 0, 0)");
   }
 
   componentDidMount() {
@@ -659,44 +934,7 @@ class LineChart extends React.Component<LineChartProps, {}> {
   }
 }
 
-class LinearLeastSquaresResult {
-  m: number;
-  b: number;
-  r2: number;
-}
-function linearLeastSquares(points: Vector2[]): LinearLeastSquaresResult {
-  assert(points != null);
-  assert(points.length >= 2);
 
-  let Sx = 0;
-  for(let i = 0; i < points.length; i++) { Sx += points[i].x; }
-
-  let Sy = 0;
-  for (let i = 0; i < points.length; i++) { Sy += points[i].y; }
-
-  let Sxy = 0;
-  for (let i = 0; i < points.length; i++) { Sxy += (points[i].x * points[i].y); }
-
-  let Sxx = 0;
-  for (let i = 0; i < points.length; i++) { Sxx += (points[i].x * points[i].x); }
-
-  let Syy = 0;
-  for (let i = 0; i < points.length; i++) { Syy += (points[i].y * points[i].y); }
-
-  const SxSx = Sx * Sx;
-  const n = points.length;
-
-  let regressionLine = new LinearLeastSquaresResult();
-  let denominator = ((n * Sxx) - SxSx);
-  regressionLine.b = ((Sy * Sxx) - (Sx * Sxy)) / denominator;
-  regressionLine.m = ((n * Sxy) - (Sx * Sy)) / denominator;
-
-  const r = ((n * Sxy) - (Sx * Sy)) / (Math.sqrt(((n * Sxx) - (Sx * Sx))) * Math.sqrt(((n * Syy) - (Sy * Sy))));
-
-  regressionLine.r2 = r * r;
-
-  return regressionLine;
-}
 function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: number): number[] {
   return closes.map((close, closeIndex) => {
     const startCandlestickIndex = Math.max(closeIndex - (linRegCandleCount - 1), 0);
@@ -704,129 +942,14 @@ function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: nu
 
     if(pointCount < linRegCandleCount) { return 0; }
 
-    let points = new Array<Vector2>(pointCount);
+    let points = new Array<Maths.Vector2>(pointCount);
 
     for(let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
-      points[pointIndex] = new Vector2(pointIndex, closes[startCandlestickIndex + pointIndex]);
+      points[pointIndex] = new Maths.Vector2(pointIndex, closes[startCandlestickIndex + pointIndex]);
     }
 
-    return linearLeastSquares(points).m / close;
+    return Maths.linearLeastSquares(points).m / close;
   });
-}
-
-function movingDerivative(values: number[], h: number): number[] {
-  assert(values !== null);
-  assert(h > 0);
-
-  if (values.length < 2) { return new Array<number>(values.length); }
-
-  const lastIndex = values.length - 1;
-  return values.map((value, index) => {
-      if (index === 0) {
-          // forward difference
-          return (values[index + 1] - values[index]) / h;
-      } else if (index === lastIndex) {
-          // backward difference
-          return (values[index] - values[index - 1]) / h;
-      } else {
-          // central difference
-          return (values[index + 1] - values[index - 1]) / (2 * h);
-      }
-  });
-}
-function movingSecondDerivative(values: number[], h: number): number[] {
-  assert(values !== null);
-  assert(h > 0);
-
-  if (values.length < 3) { return new Array<number>(values.length); }
-
-  const lastIndex = values.length - 1;
-  const hSquared = h * h;
-  return values.map((value, index) => {
-      if (index === 0) {
-          // forward
-          return (values[index + 2] - (2 * values[index + 1]) + values[index]) / hSquared;
-      } else if (index === lastIndex) {
-          // backward
-          return (values[index] - (2 * values[index - 1]) + values[index - 2]) / hSquared;
-      } else {
-          // central
-          return (values[index + 1] - (2 * values[index]) + values[index - 1]) / hSquared;
-      }
-  });
-}
-
-function mean(values: number[]): number {
-  let valueSum = 0;
-  
-  for(let i = 0; i < values.length; i++) {
-      valueSum += values[i];
-  }
-
-  return valueSum / values.length;
-}
-function meanArraySlice(values: number[], startIndex: number, valueCount: number): number {
-  assert(values !== null);
-  assert(valueCount >= 1);
-  assert((startIndex + valueCount) <= values.length);
-
-  let valueSum = 0;
-
-  const endIndexExclusive = startIndex + valueCount;
-  for (let i = startIndex; i < endIndexExclusive; i++) {
-      valueSum += values[i];
-  }
-
-  return valueSum / valueCount;
-}
-function laggingSimpleMovingAverage(values: number[], lookbacklength: number): number[] {
-  assert(values !== null);
-  assert(lookbacklength > 0);
-
-  return values.map((value, currentValueIndex) => {
-      const firstValueIndex = Math.max(currentValueIndex - (lookbacklength - 1), 0);
-      const valueCount = (currentValueIndex - firstValueIndex) + 1;
-
-      return meanArraySlice(values, firstValueIndex, valueCount);
-  });
-}
-function laggingExponentialMovingAverage(values: number[], lookbacklength: number): number[] {
-  assert(values !== null);
-  assert(lookbacklength > 0);
-
-  if(values.length === 0) { return new Array<number>(0); }
-
-  const alpha = 2.0 / (lookbacklength + 1); // smoothing factor
-  let ema = new Array<number>(values.length);
-
-  ema[0] = values[0];
-
-  for(let i = 1; i < values.length; i++) {
-      ema[i] = ((1.0 - alpha) * ema[i - 1]) + (alpha * values[i]);
-  }
-
-  return ema;
-}
-
-function generateArray<T>(arrayLength: number, genElementFunc: (index: number) => T): T[] {
-  let array = new Array<T>(arrayLength);
-
-  for(let i = 0; i < arrayLength; i++) {
-    array[i] = genElementFunc(i);
-  }
-
-  return array;
-}
-function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1, e2: T2) => TR): TR[] {
-  assert(arr1.length === arr2.length);
-
-  let result = new Array<TR>(arr1.length);
-
-  for(let i = 0; i < result.length; i++) {
-    result[i] = combineFunc(arr1[i], arr2[i]);
-  }
-
-  return result;
 }
 
 interface AppState {
@@ -898,7 +1021,7 @@ class App extends React.Component<{}, AppState> {
 
     const price = lastPrice * 2;
 
-    buyEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", buyEthAmount, price);
+    Gemini.buyEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", buyEthAmount, price);
   }
 
   onSellEthAmountChange(event: any) {
@@ -914,7 +1037,7 @@ class App extends React.Component<{}, AppState> {
 
     const price = lastPrice / 2;
 
-    sellEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", sellEthAmount, price);
+    Gemini.sellEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", sellEthAmount, price);
   }
 
   onGeminiApiKeyChange(event: any) {
@@ -961,7 +1084,7 @@ class App extends React.Component<{}, AppState> {
     saveSettings(settings);
   }
   onSendTestTextClick(event: any) {
-    sendTextWithTwilio(
+    SMS.sendTextWithTwilio(
       this.state.twilioAccountSid, this.state.twilioAuthToken,
       this.state.fromPhoneNumber, this.state.toPhoneNumber,
       "Text from CryptoWick!"
@@ -973,7 +1096,7 @@ class App extends React.Component<{}, AppState> {
   }
 
   reloadCandlesticks() {
-    load15MinCandlesticks("ETH", "USD", "Gemini")
+    CryptoCompare.load15MinCandlesticks("ETH", "USD", "Gemini")
     .then(tradeAnalysis => {
       const lastOpenTime = this.state.tradeAnalysis
         ? this.state.tradeAnalysis.openTimes[this.state.tradeAnalysis.candlestickCount - 1]
@@ -1071,7 +1194,7 @@ class App extends React.Component<{}, AppState> {
     }
 
     if(settings && settings.geminiApiKey) {
-      loadGeminiBalances(settings.geminiApiKey, settings.geminiApiSecret)
+      Gemini.loadGeminiBalances(settings.geminiApiKey, settings.geminiApiSecret)
         .then(json => {
           this.setState({
             usdBalance: json.USD,
@@ -1099,7 +1222,7 @@ class App extends React.Component<{}, AppState> {
     const lows = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.lows : this.state.tradeAnalysis.heikinLows;
     const closes = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.closes : this.state.tradeAnalysis.heikinCloses;
 
-    const heikinAshiCandlestickHeights = combineArrays(
+    const heikinAshiCandlestickHeights = ArrayUtils.combineArrays(
       this.state.tradeAnalysis.heikinOpens,
       this.state.tradeAnalysis.heikinCloses,
       (a, b) => b - a
@@ -1116,7 +1239,7 @@ class App extends React.Component<{}, AppState> {
     }
 
     const candlestickColors = this.state.tradeAnalysis
-      ? combineArrays(
+      ? ArrayUtils.combineArrays(
           opens,
           closes,
           (open, close) => (close > open) ? "green" : "red"
@@ -1286,42 +1409,6 @@ class App extends React.Component<{}, AppState> {
 export default App;
 
 // initialization
-function load15MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeName: string): Promise<TradeAnalysis> {
-  const minutesPerCandlestick = 15;
-  return fetch(`https://min-api.cryptocompare.com/data/histominute?fsym=${fromSymbol}&tsym=${toSymbol}&aggregate=${minutesPerCandlestick}&e=${exchangeName}`)
-    .then(response => {
-      if (!response.ok) {
-        console.log("Error fetching data from CryptoWatch.");
-        return;
-      }
-
-      return response.json();
-    }).then(json => {
-      if ((json.Response !== "Success") || (json.Type < 100)) {
-        console.log(`Error fetching data from CryptoWatch. Response = ${json.Response}, Type = ${json.Type}`);
-      }
-
-      const candlestickCount: number = json.Data.length;
-      
-      let openTimes = new Array(candlestickCount);
-      let opens = new Array(candlestickCount);
-      let highs = new Array(candlestickCount);
-      let lows = new Array(candlestickCount);
-      let closes = new Array(candlestickCount);
-      let volumes = new Array(candlestickCount);
-
-      for (let i = 0; i < json.Data.length; i++) {
-        openTimes[i] = json.Data[i].time;
-        opens[i] = json.Data[i].open;
-        highs[i] = json.Data[i].high;
-        lows[i] = json.Data[i].low;
-        closes[i] = json.Data[i].close;
-        volumes[i] = json.Data[i].volumefrom;
-      }
-
-      return new TradeAnalysis(fromSymbol + toSymbol, exchangeName, `${minutesPerCandlestick}m`, openTimes, opens, highs, lows, closes, volumes);
-    });
-}
 
 let lastNonce = 0;
 function nextNonce(): number {
@@ -1333,70 +1420,3 @@ function nextNonce(): number {
   return newNonce;
 }
 
-function loadGeminiBalances(apiKey: string, apiSecret: string) {
-  const payload = {
-    request: "/v1/balances",
-    nonce: nextNonce()
-  };
-
-  return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/balances", payload)
-    .then(response => {
-      if (!response.ok) {
-        console.log("Error fetching data from Gemini.");
-        return;
-      }
-
-      return response.json();
-    }).then(json => {
-      const findBalanceObj = (currency: string) => (json as Array<any>).find(balanceObj => balanceObj.currency === currency);
-      
-      return {
-        USD: findBalanceObj("USD").available,
-        BTC: findBalanceObj("BTC").available,
-        ETH: findBalanceObj("ETH").available
-      };
-    });
-}
-function buyEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
-  geminiNewOrder(apiKey, apiSecret, symbol, "buy", amount, price);
-}
-function sellEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
-  geminiNewOrder(apiKey, apiSecret, symbol, "sell", amount, price);
-}
-function geminiNewOrder(apiKey: string, apiSecret: string, symbol: string, side: string, amount: number, price: number) {
-  const nonce = nextNonce();
-  const clientOrderId = nonce.toString();
-
-  const payload = {
-    request: "/v1/order/new",
-    nonce: nonce,
-    client_order_id: clientOrderId,
-    symbol: symbol,
-    amount: amount.toString(),
-    price: price.toString(),
-    side: side,
-    type: "exchange limit",
-    options: ["immediate-or-cancel"]
-  };
-
-  return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/order/new", payload);
-}
-
-function callGeminiPrivateApi(apiKey: string, apiSecret: string, url: string, payload: any) {
-  const jsonPayload = JSON.stringify(payload);
-  const base64JsonPayload = btoa(jsonPayload);
-  const hashedSignatureBytes = HmacSHA384(base64JsonPayload, apiSecret);
-  const signature = enc.Hex.stringify(hashedSignatureBytes);
-
-  const proxyUrl = "http://localhost:8080/" + url;
-
-  return fetch(proxyUrl, {
-    method: "POST",
-    headers: {
-      "X-GEMINI-APIKEY": apiKey,
-      "X-GEMINI-PAYLOAD": base64JsonPayload,
-      "X-GEMINI-SIGNATURE": signature
-    },
-    body: ""
-  });
-}
