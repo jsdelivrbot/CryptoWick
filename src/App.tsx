@@ -44,6 +44,10 @@ namespace Maths {
     constructor(public x: number, public y: number) {}
   }
 
+  export function transformValueInRange(min1: number, max1: number, min2: number, max2: number, value: number): number {
+    const pctInRange = (value - min1) / (max1 - min1);
+    return min2 + (pctInRange * (max2 - min2))
+  }
   export class LinearLeastSquaresResult {
     m: number;
     b: number;
@@ -123,30 +127,64 @@ namespace Maths {
         }
     });
   }
-  export function mean(values: number[]): number {
-    let valueSum = 0;
-    
-    for(let i = 0; i < values.length; i++) {
-        valueSum += values[i];
-    }
-  
-    return valueSum / values.length;
-  }
-  export function meanArraySlice(values: number[], startIndex: number, valueCount: number): number {
+  export function sum(values: number[], startIndex: number, valueCount: number): number {
     Debug.assert(values !== null);
     Debug.assert(valueCount >= 1);
     Debug.assert((startIndex + valueCount) <= values.length);
-  
+
     let valueSum = 0;
-  
+    
     const endIndexExclusive = startIndex + valueCount;
-    for (let i = startIndex; i < endIndexExclusive; i++) {
+    for(let i = startIndex; i < endIndexExclusive; i++) {
         valueSum += values[i];
     }
   
-    return valueSum / valueCount;
+    return valueSum;
   }
-  export function laggingSimpleMovingAverage(values: number[], lookbacklength: number): number[] {
+  export function min(values: number[], startIndex: number, valueCount: number): number {
+    Debug.assert(values !== null);
+    Debug.assert(valueCount >= 1);
+    Debug.assert((startIndex + valueCount) <= values.length);
+
+    const endIndexExclusive = startIndex + valueCount;
+    let minValue = values[startIndex];
+
+    for(let i = startIndex + 1; i < endIndexExclusive; i++) {
+      if(values[i] < minValue) {
+        minValue = values[i];
+      }
+    }
+
+    return minValue;
+  }
+  export function max(values: number[], startIndex: number, valueCount: number): number {
+    Debug.assert(values !== null);
+    Debug.assert(valueCount >= 1);
+    Debug.assert((startIndex + valueCount) <= values.length);
+
+    const endIndexExclusive = startIndex + valueCount;
+    let maxValue = values[startIndex];
+
+    for(let i = startIndex + 1; i < endIndexExclusive; i++) {
+      if(values[i] > maxValue) {
+        maxValue = values[i];
+      }
+    }
+
+    return maxValue;
+  }
+  export function mean(values: number[]): number {
+    return sum(values, 0, values.length) / values.length;
+  }
+  export function meanArraySlice(values: number[], startIndex: number, valueCount: number): number {
+    return sum(values, startIndex, valueCount) / valueCount;
+  }
+
+  export function laggingReduce(
+    values: number[],
+    lookbacklength: number,
+    reduceFunc: (values: number[], startIndex: number, count: number) => number
+  ): number[] {
     Debug.assert(values !== null);
     Debug.assert(lookbacklength > 0);
   
@@ -154,8 +192,11 @@ namespace Maths {
         const firstValueIndex = Math.max(currentValueIndex - (lookbacklength - 1), 0);
         const valueCount = (currentValueIndex - firstValueIndex) + 1;
   
-        return meanArraySlice(values, firstValueIndex, valueCount);
+        return reduceFunc(values, firstValueIndex, valueCount);
     });
+  }
+  export function laggingSimpleMovingAverage(values: number[], lookbacklength: number): number[] {
+    return laggingReduce(values, lookbacklength, meanArraySlice);
   }
   export function laggingExponentialMovingAverage(values: number[], lookbacklength: number): number[] {
     Debug.assert(values !== null);
@@ -173,6 +214,18 @@ namespace Maths {
     }
   
     return ema;
+  }
+
+  export function stochasticOscillator(values: number[], lookbacklength: number): number[] {
+    return laggingReduce(values, lookbacklength, (values, startIndex, count) => {
+      const endIndexExclusive = startIndex + count;
+      const curVal = values[endIndexExclusive - 1];
+      const low = Maths.min(values, startIndex, count);
+      const high = Maths.max(values, startIndex, count);
+      const valRange = high - low;
+
+      return (valRange > 0) ? ((curVal - low) / (high - low)) : 0;
+    });
   }
 }
 
@@ -390,12 +443,18 @@ class TradeAnalysis {
   isLocalMinima: boolean[];
   isLocalMaxima: boolean[];
 
-  lineOfBestFitPercentCloseSlopes: number[];
-  lineOfBestFitPercentCloseSlopeConcavity: number[];
+  linRegSlopePctClose: number[];
+  linRegSlopePctCloseConcavity: number[];
+  linRegSlopePctCloseMulVolumeMean: number[];
 
   sma20: number[];
   sma1stDerivative: number[];
   sma2ndDerivative: number[];
+
+  stochasticClose: number[];
+  stochasticVolume: number[];
+
+  bullishness: number[];
 
   constructor(
     securitySymbol: string,
@@ -421,17 +480,39 @@ class TradeAnalysis {
       this.calculateHeikinAshiCandlesticks();
 
       //this.isGreens = areConsecutiveBullishCandlesticks(4, this.opens, this.closes);
-      this.isLocalMinima = areLocalMinima(2, this.lows);
-      this.isLocalMaxima = areLocalMaxima(2, this.highs);
+      const extremaRadius = 1;
+      this.isLocalMinima = areLocalMinima(extremaRadius, this.lows);
+      this.isLocalMaxima = areLocalMaxima(extremaRadius, this.highs);
+      consolidateAdjacentExtrema(this.lows, this.isLocalMinima, this.highs, this.isLocalMaxima);
 
-      this.lineOfBestFitPercentCloseSlopes = lineOfBestFitPercentCloseSlopes(this.closes, 8);
-      this.lineOfBestFitPercentCloseSlopeConcavity = Maths.movingSecondDerivative(
-        this.lineOfBestFitPercentCloseSlopes, 1
+      const linRegLookbackLength = 8;
+      this.linRegSlopePctClose = lineOfBestFitPercentCloseSlopes(this.closes, linRegLookbackLength);
+      this.linRegSlopePctCloseConcavity = Maths.movingSecondDerivative(
+        this.linRegSlopePctClose, 1
+      );
+      this.linRegSlopePctCloseMulVolumeMean = ArrayUtils.combineArrays(
+        this.linRegSlopePctClose,
+        Maths.laggingReduce(this.volumes, linRegLookbackLength, Maths.meanArraySlice),
+        (e1, e2) => e1 * e2
       );
 
-      this.sma20 = Maths.laggingSimpleMovingAverage(this.closes, 8);
+      this.sma20 = Maths.laggingSimpleMovingAverage(this.closes, linRegLookbackLength);
       this.sma1stDerivative = Maths.movingDerivative(this.sma20, 1);
       this.sma2ndDerivative = Maths.movingSecondDerivative(this.sma20, 1);
+
+      this.stochasticClose = Maths.stochasticOscillator(this.closes, linRegLookbackLength);
+      this.stochasticVolume = Maths.stochasticOscillator(this.volumes, linRegLookbackLength);
+
+      this.bullishness = new Array<number>(this.candlestickCount);
+      for(let i = 0; i < this.candlestickCount; i++) {
+        const signedBodyLengthPctClose = (this.closes[i] - this.opens[i]) / this.closes[i];
+        const signedBodyLengthPctCloseMulVolume = signedBodyLengthPctClose * this.volumes[i];
+
+        this.bullishness[i] = (
+          (0.0005 * signedBodyLengthPctCloseMulVolume) +
+          (1 * this.linRegSlopePctClose[i])
+        );
+      }
   }
 
   get candlestickCount() {
@@ -537,25 +618,78 @@ function areConsecutiveBullishCandlesticks(windowSize: number, opens: number[], 
 
   return result;
 }
-function areLocalMinima(candlestickRadius: number, lows: number[]): boolean[] {
-  Debug.assert(candlestickRadius >= 1);
 
-  const windowSize = (2 * candlestickRadius) + 1;
-  const maxIndex = lows.length - 1;
-  return lows.map((low, index) => ((index >= candlestickRadius) && (index <= (maxIndex - candlestickRadius)))
-    ? ArrayUtils.arraySliceAll(otherLow => (otherLow >= low), lows, index - candlestickRadius, windowSize)
+enum ExtremaType {
+  MINIMA,
+  MAXIMA
+}
+
+function areLocalMinima(valueRadius: number, values: number[]): boolean[] {
+  Debug.assert(valueRadius >= 1);
+
+  const windowSize = (2 * valueRadius) + 1;
+  const maxIndex = values.length - 1;
+  return values.map((value, index) => ((index >= valueRadius) && (index <= (maxIndex - valueRadius)))
+    ? ArrayUtils.arraySliceAll(otherValue => (otherValue >= value), values, index - valueRadius, windowSize)
     : false
   );
 }
-function areLocalMaxima(candlestickRadius: number, highs: number[]): boolean[] {
-  Debug.assert(candlestickRadius >= 1);
+function areLocalMaxima(valueRadius: number, values: number[]): boolean[] {
+  Debug.assert(valueRadius >= 1);
 
-  const windowSize = (2 * candlestickRadius) + 1;
-  const maxIndex = highs.length - 1;
-  return highs.map((high, index) => ((index >= candlestickRadius) && (index <= (maxIndex - candlestickRadius)))
-    ? ArrayUtils.arraySliceAll(otherHigh => (otherHigh <= high), highs, index - candlestickRadius, windowSize)
+  const windowSize = (2 * valueRadius) + 1;
+  const maxIndex = values.length - 1;
+  return values.map((value, index) => ((index >= valueRadius) && (index <= (maxIndex - valueRadius)))
+    ? ArrayUtils.arraySliceAll(otherValue => (otherValue <= value), values, index - valueRadius, windowSize)
     : false
   );
+}
+function consolidateAdjacentExtrema(
+  valuesForMinima: number[],
+  areLocalMinima: boolean[],
+  valuesForMaxima: number[],
+  areLocalMaxima: boolean[]
+) {
+  const valueCount = valuesForMinima.length;
+  let lastExtremaType: ExtremaType | null = null;
+  let lastExtremaIndex = -1;
+
+  for(let i = 0; i < valueCount; i++) {
+    if(areLocalMinima[i]) {
+      if(lastExtremaType !== ExtremaType.MINIMA) {
+        // This minima is NOT adjacent to another minima.
+        lastExtremaIndex = i;
+      } else {
+        // Only retain the lower (or later if equal) of the two minima.
+        if(valuesForMinima[i] <= valuesForMinima[lastExtremaIndex]) {
+          areLocalMinima[lastExtremaIndex] = false;        
+          lastExtremaIndex = i;
+        } else {
+          areLocalMinima[i] = false;
+        }
+      }
+
+      lastExtremaType = ExtremaType.MINIMA;            
+    }
+    
+    // not else-if because a candlestick can be a low AND a high
+    if(areLocalMaxima[i]) {
+      if(lastExtremaType !== ExtremaType.MAXIMA) {
+        // This maxima is NOT adjacent to another maxima.
+        lastExtremaIndex = i;
+      } else {
+        // Only retain the higher (or later if equal) of the two maxima.
+        if(valuesForMaxima[i] >= valuesForMaxima[lastExtremaIndex]) {
+          areLocalMaxima[lastExtremaIndex] = false;        
+          lastExtremaIndex = i;
+        } else {
+          areLocalMaxima[i] = false;
+        }
+      }
+
+      lastExtremaType = ExtremaType.MAXIMA; 
+    }
+  }
 }
 
 class Settings {
@@ -586,6 +720,7 @@ interface CandlestickChartProps {
   highs: number[];
   lows: number[];
   closes: number[];
+  volumes: number[];
   areBullish?: boolean[];
   areBearish?: boolean[];
   width: number;
@@ -639,7 +774,9 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     const low = this.props.lows[i];
     const close = this.props.closes[i];
 
-    const fillStyle = (close > open) ? "green" : "red";
+    const maxVolume = Math.max(...this.props.volumes);
+    const a = 1;//this.props.volumes[i] / maxVolume;
+    const fillStyle = (close > open) ? `rgba(0, 128, 0, ${a})` : `rgba(255, 0, 0, ${a})`;
 
     const bodyLeft = columnX + this.props.columnHorizontalPadding;
     const bodyRight = (columnX + this.props.columnWidth) - this.props.columnHorizontalPadding;
@@ -1221,6 +1358,7 @@ class App extends React.Component<{}, AppState> {
     const highs = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.highs : this.state.tradeAnalysis.heikinHighs;
     const lows = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.lows : this.state.tradeAnalysis.heikinLows;
     const closes = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.closes : this.state.tradeAnalysis.heikinCloses;
+    const volumes = this.state.tradeAnalysis.volumes;
 
     const heikinAshiCandlestickHeights = ArrayUtils.combineArrays(
       this.state.tradeAnalysis.heikinOpens,
@@ -1259,10 +1397,11 @@ class App extends React.Component<{}, AppState> {
           highs={highs}
           lows={lows}
           closes={closes}
+          volumes={volumes}
           width={800}
           height={300}
-          areBullish={areEntryPoints}
-          areBearish={areExitPoints}
+          areBullish={this.state.tradeAnalysis.isLocalMinima}
+          areBearish={this.state.tradeAnalysis.isLocalMaxima}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
@@ -1272,6 +1411,56 @@ class App extends React.Component<{}, AppState> {
           chartTitle="Volume"
           values={this.state.tradeAnalysis.volumes}
           colors={candlestickColors}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Stochastic Close"
+          values={this.state.tradeAnalysis.stochasticClose}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Stochastic Volume"
+          values={this.state.tradeAnalysis.stochasticVolume}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Bullishness"
+          values={this.state.tradeAnalysis.bullishness}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Lin. Reg. % Close Slope"
+          values={this.state.tradeAnalysis.linRegSlopePctClose}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Lin. Reg. % Close Slope * Volume"
+          values={this.state.tradeAnalysis.linRegSlopePctCloseMulVolumeMean}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -1311,15 +1500,7 @@ class App extends React.Component<{}, AppState> {
           scrollOffsetInColumns={scrollOffsetInColumns}
         />
 
-        <LineChart
-          chartTitle="Lin. Reg. % Close Slope"
-          values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopes}
-          width={800}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
+        
         <LineChart
           chartTitle="Lin. Reg. % Close Slope Concavity"
           values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity}
