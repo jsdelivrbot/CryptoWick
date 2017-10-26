@@ -557,10 +557,37 @@ function updateTradingAlgorithm(
 ) {
   const curPrice = tradeAnalysis.closes[curCandlestickIndex];
 
-  if(!state.isInTrade) {
-    // look for entry
-    if(curCandlestickIndex === 0) { return; }
+  const shouldEnter = () => {
+    const extrema = areMinimaMaximaToExtremas(
+      tradeAnalysis.lows, tradeAnalysis.isLocalMinima, tradeAnalysis.highs, tradeAnalysis.isLocalMaxima
+    ).filter(x => x.index <= curCandlestickIndex);
 
+    if(extrema.length < 4) { return false; }
+
+    const e1 = extrema[extrema.length - 4];
+    const e2 = extrema[extrema.length - 3];
+    const e3 = extrema[extrema.length - 2];
+    const e4 = extrema[extrema.length - 1];
+    
+    if(!(
+      (e1.type === ExtremaType.MAXIMA) &&
+      (e2.type === ExtremaType.MINIMA) &&
+      (e3.type === ExtremaType.MAXIMA) &&
+      (e4.type === ExtremaType.MINIMA)
+    )) {
+      return false;
+    }
+    
+    const lowsPriceIncreasePercent = (e4.value - e2.value) / e2.value;
+    const highsPriceIncreasePercent = (e3.value - e1.value) / e3.value;
+    const priceIncreasePercentThreshold = 0.005;
+
+    return (
+      (lowsPriceIncreasePercent >= priceIncreasePercentThreshold) &&
+      (highsPriceIncreasePercent >= priceIncreasePercentThreshold)
+    );
+  };
+  const shouldEnter2 = () => {
     const isBearishMinus2 = tradeAnalysis.heikinCloses[curCandlestickIndex - 2] < tradeAnalysis.heikinOpens[curCandlestickIndex - 2];
     const isBullishMinus1 = tradeAnalysis.heikinCloses[curCandlestickIndex - 1] > tradeAnalysis.heikinOpens[curCandlestickIndex - 1];
     
@@ -568,8 +595,18 @@ function updateTradingAlgorithm(
     const signedBodyHeightPctOfOpen = signedBodyHeight / tradeAnalysis.heikinOpens[curCandlestickIndex];
     const isGreenNonHeikin = tradeAnalysis.closes[curCandlestickIndex] > tradeAnalysis.opens[curCandlestickIndex];
     const isBullishEnough = signedBodyHeightPctOfOpen > (0.25 / 100);
-    
-    if(isBearishMinus2 && isBullishMinus1 && isGreenNonHeikin && isBullishEnough) {
+
+    return isBearishMinus2 && isBullishMinus1 && isGreenNonHeikin && isBullishEnough;
+  };
+  const shouldExit = () => {
+    return curPrice <= state.trailingStopLossPrice;
+  };
+
+  if(!state.isInTrade) {
+    // look for entry
+    if(curCandlestickIndex === 0) { return; }
+
+    if(shouldEnter()) {
       const stopLossDropPercent = 1 / 100;
       const minTakeProfitRisePercent = 1 / 100;
 
@@ -582,7 +619,7 @@ function updateTradingAlgorithm(
       }
     }
   } else {
-    if(curPrice <= state.trailingStopLossPrice) {
+    if(shouldExit()) {
       if(trySell()) {
         state.isInTrade = false;
       }
@@ -692,6 +729,32 @@ function consolidateAdjacentExtrema(
   }
 }
 
+class Extrema {
+  constructor(public type: ExtremaType, public value: number, public index: number) {}
+}
+
+function areMinimaMaximaToExtremas(
+  valuesForMinima: number[],
+  areLocalMinima: boolean[],
+  valuesForMaxima: number[],
+  areLocalMaxima: boolean[]
+): Extrema[] {
+  let extrema = new Array<Extrema>();
+
+  const valueCount = valuesForMinima.length;
+  for(let i = 0; i < valueCount; i++) {
+    if(areLocalMinima[i]) {
+      extrema.push(new Extrema(ExtremaType.MINIMA, valuesForMinima[i], i));
+    }
+
+    if(areLocalMaxima[i]) {
+      extrema.push(new Extrema(ExtremaType.MAXIMA, valuesForMaxima[i], i));
+    }
+  }
+
+  return extrema;
+}
+
 class Settings {
   constructor(
     public geminiApiKey: string,
@@ -735,11 +798,11 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
 
   get minPrice(): number {
     if (!this.props.tradeAnalysis) { return 0; }
-    return Math.min(...this.props.lows);
+    return 0.99 * Math.min(...this.props.lows);
   }
   get maxPrice(): number {
     if (!this.props.tradeAnalysis) { return 0; }
-    return Math.max(...this.props.highs);
+    return 1.01 * Math.max(...this.props.highs);
   }
 
   iFromRightToI(iFromRight: number): number {
@@ -1389,6 +1452,10 @@ class App extends React.Component<{}, AppState> {
 
     const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
 
+    const showExtrema = false;
+    const areBullish = !showExtrema ? areEntryPoints : this.state.tradeAnalysis.isLocalMinima;
+    const areBearish = !showExtrema ? areExitPoints : this.state.tradeAnalysis.isLocalMaxima;
+
     return (
       <div>
         <CandlestickChart
@@ -1400,8 +1467,8 @@ class App extends React.Component<{}, AppState> {
           volumes={volumes}
           width={800}
           height={300}
-          areBullish={this.state.tradeAnalysis.isLocalMinima}
-          areBearish={this.state.tradeAnalysis.isLocalMaxima}
+          areBullish={areBullish}
+          areBearish={areBearish}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
