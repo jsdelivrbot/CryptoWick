@@ -385,8 +385,7 @@ namespace Gemini {
 }
 
 namespace CryptoCompare {
-  export function load15MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeName: string): Promise<TradeAnalysis> {
-    const minutesPerCandlestick = 15;
+  export function loadAggregate1MinCandlesticks(fromSymbol: string, toSymbol: string, exchangeName: string, minutesPerCandlestick: number): Promise<TradeAnalysis> {
     return fetch(`https://min-api.cryptocompare.com/data/histominute?fsym=${fromSymbol}&tsym=${toSymbol}&aggregate=${minutesPerCandlestick}&e=${exchangeName}`)
       .then(response => {
         if (!response.ok) {
@@ -777,6 +776,18 @@ function loadSettings(): Settings | null {
 
 const MARKER_VERTICAL_MARGIN = 5;
 
+enum CandlestickMarkerType {
+  SQUARE,
+  CIRCLE
+}
+enum CandlestickMarkerPosition {
+  ABOVE,
+  BELOW
+}
+class CandlestickMarker {
+  constructor(public type: CandlestickMarkerType, public position: CandlestickMarkerPosition) {}
+}
+
 interface CandlestickChartProps {
   tradeAnalysis: TradeAnalysis | null;
   opens: number[];
@@ -784,8 +795,7 @@ interface CandlestickChartProps {
   lows: number[];
   closes: number[];
   volumes: number[];
-  areBullish?: boolean[];
-  areBearish?: boolean[];
+  markers?: CandlestickMarker[][];
   width: number;
   height: number;
   columnWidth: number;
@@ -882,6 +892,29 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     );
     Graphics.strokeLine(this.context2d, lineStartPoint, lineEndPoint, "rgba(0, 0, 0, 0.3)");
   }
+  drawMarker(marker: CandlestickMarker, columnX: number, topY: number) {
+    if ((this.context2d === null)) { return; }
+    
+    const markerWidth = this.props.columnWidth - (2 * this.props.columnHorizontalPadding);
+    const markerHeight = markerWidth;
+    const markerLeftX = columnX + this.props.columnHorizontalPadding;
+    const markerCenterX = columnX + (this.props.columnWidth / 2);
+    const fillStyle = "black";
+
+    switch(marker.type) {
+      case CandlestickMarkerType.CIRCLE:
+        const circleRadius = markerWidth / 2;
+        const circlePos = new Maths.Vector2(markerCenterX, topY + circleRadius);
+        Graphics.fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
+        break;
+      case CandlestickMarkerType.SQUARE:
+        const squarePos = new Maths.Vector2(markerLeftX, topY);
+        Graphics.fillRect(this.context2d, squarePos, markerWidth, markerHeight, fillStyle);
+        break;
+    }
+    
+    topY += markerHeight + MARKER_VERTICAL_MARGIN;
+  }
   drawToCanvas() {
     if (this.context2d === null) { return; }
 
@@ -893,30 +926,39 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
         this.drawCandlestick(iFromRight);
       }
 
-      // draw boolean indicators
-      for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
-        const i = this.iFromRightToI(iFromRight);
-        const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
+      // markers
+      if(this.props.markers) {
+        for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
+          const i = this.iFromRightToI(iFromRight);
+          const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
+  
+          const markerWidth = this.props.columnWidth - (2 * this.props.columnHorizontalPadding);
+          const markerHeight = markerWidth;
+  
+          const high = this.props.highs[i];
+          const wickTop = this.priceToY(high);
+  
+          // Draw markers below.
+          const low = this.props.lows[i];
+          const wickBottom = this.priceToY(low);
 
-        const high = this.props.highs[i];
-        const wickTop = this.priceToY(high);
+          let topY = wickBottom + MARKER_VERTICAL_MARGIN;
+          this.props.markers[i].forEach(marker => {
+            if ((marker.position !== CandlestickMarkerPosition.BELOW)) { return; }
 
-        const low = this.props.lows[i];
-        const wickBottom = this.priceToY(low);
+            this.drawMarker(marker, columnX, topY);
+            
+            topY += markerHeight + MARKER_VERTICAL_MARGIN;
+          });
+  
+          topY = wickTop - MARKER_VERTICAL_MARGIN - markerHeight;
+          this.props.markers[i].forEach(marker => {
+            if ((marker.position !== CandlestickMarkerPosition.ABOVE)) { return; }
 
-        const circleRadius = (this.props.columnWidth / 2) - this.props.columnHorizontalPadding;
-        const circleX = columnX + (this.props.columnWidth / 2);
-        const circleYMarginFromWick = circleRadius + MARKER_VERTICAL_MARGIN;
-        const fillStyle = "black";
-
-        if(this.props.areBullish && this.props.areBullish[i]) {
-          const circlePos = new Maths.Vector2(circleX, wickBottom + circleYMarginFromWick);
-          Graphics.fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
-        }
-
-        if(this.props.areBearish && this.props.areBearish[i]) {
-          const circlePos = new Maths.Vector2(circleX, wickTop - circleYMarginFromWick);
-          Graphics.fillCircle(this.context2d, circlePos, circleRadius, fillStyle);
+            this.drawMarker(marker, columnX, topY);
+            
+            topY -= markerHeight + MARKER_VERTICAL_MARGIN;
+          });
         }
       }
 
@@ -1156,6 +1198,7 @@ interface AppState {
   tradeAnalysis: TradeAnalysis | null;
 
   usdBalance: number;
+  btcBalance: number;
   ethBalance: number;
 
   buyUsdAmount: string;
@@ -1190,6 +1233,7 @@ class App extends React.Component<{}, AppState> {
       tradeAnalysis: null,
 
       usdBalance: 0,
+      btcBalance: 0,
       ethBalance: 0,
 
       buyUsdAmount: "",
@@ -1296,20 +1340,20 @@ class App extends React.Component<{}, AppState> {
   }
 
   reloadCandlesticks() {
-    CryptoCompare.load15MinCandlesticks("ETH", "USD", "Gemini")
+    CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", 15)
     .then(tradeAnalysis => {
       const lastOpenTime = this.state.tradeAnalysis
         ? this.state.tradeAnalysis.openTimes[this.state.tradeAnalysis.candlestickCount - 1]
         : null;
       const mostRecentOpenTime = tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1];
 
+      this.setState({
+        tradeAnalysis: tradeAnalysis
+      });
+
       const isNewAnalysis = !lastOpenTime || (mostRecentOpenTime > lastOpenTime);
 
       if (isNewAnalysis) {
-        this.setState({
-          tradeAnalysis: tradeAnalysis
-        });
-
         if(lastOpenTime === null) {
           const fakeBuyEth = () => true;
           const fakeSellEth = () => true;
@@ -1398,6 +1442,7 @@ class App extends React.Component<{}, AppState> {
         .then(json => {
           this.setState({
             usdBalance: json.USD,
+            btcBalance: json.BTC,
             ethBalance: json.ETH
           });
         });
@@ -1452,9 +1497,24 @@ class App extends React.Component<{}, AppState> {
 
     const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
 
-    const showExtrema = false;
-    const areBullish = !showExtrema ? areEntryPoints : this.state.tradeAnalysis.isLocalMinima;
-    const areBearish = !showExtrema ? areExitPoints : this.state.tradeAnalysis.isLocalMaxima;
+    let markers = new Array<Array<CandlestickMarker>>(this.state.tradeAnalysis.candlestickCount);
+    for(let i = 0; i < markers.length; i++) {
+      markers[i] = new Array<CandlestickMarker>();
+
+      if(areEntryPoints[i]) {
+        markers[i].push(new CandlestickMarker(CandlestickMarkerType.SQUARE, CandlestickMarkerPosition.BELOW));
+      }
+      if(this.state.tradeAnalysis.isLocalMinima[i]) {
+        markers[i].push(new CandlestickMarker(CandlestickMarkerType.CIRCLE, CandlestickMarkerPosition.BELOW));
+      }
+
+      if(areExitPoints[i]) {
+        markers[i].push(new CandlestickMarker(CandlestickMarkerType.SQUARE, CandlestickMarkerPosition.ABOVE));
+      }
+      if(this.state.tradeAnalysis.isLocalMaxima[i]) {
+        markers[i].push(new CandlestickMarker(CandlestickMarkerType.CIRCLE, CandlestickMarkerPosition.ABOVE));
+      }
+    }
 
     return (
       <div>
@@ -1467,8 +1527,7 @@ class App extends React.Component<{}, AppState> {
           volumes={volumes}
           width={800}
           height={300}
-          areBullish={areBullish}
-          areBearish={areBearish}
+          markers={markers}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
@@ -1596,7 +1655,7 @@ class App extends React.Component<{}, AppState> {
 
     return (
       <div className="App">
-        <p>USD: {this.state.usdBalance} ETH: {this.state.ethBalance}</p>
+        <p>USD: {this.state.usdBalance} BTC: {this.state.btcBalance} ETH: {this.state.ethBalance}</p>
         {this.state.tradeAnalysis ? <p>Last: {this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1]}</p> : null}
         <div>
           <div>
