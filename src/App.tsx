@@ -479,7 +479,7 @@ class TradeAnalysis {
       this.calculateHeikinAshiCandlesticks();
 
       //this.isGreens = areConsecutiveBullishCandlesticks(4, this.opens, this.closes);
-      const extremaRadius = 1;
+      const extremaRadius = 3;
       this.isLocalMinima = areLocalMinima(extremaRadius, this.lows);
       this.isLocalMaxima = areLocalMaxima(extremaRadius, this.highs);
       consolidateAdjacentExtrema(this.lows, this.isLocalMinima, this.highs, this.isLocalMaxima);
@@ -556,7 +556,32 @@ function updateTradingAlgorithm(
 ) {
   const curPrice = tradeAnalysis.closes[curCandlestickIndex];
 
-  const shouldEnter = () => {
+  const shouldEnter3Extrema = () => {
+    const extrema = areMinimaMaximaToExtremas(
+      tradeAnalysis.lows, tradeAnalysis.isLocalMinima, tradeAnalysis.highs, tradeAnalysis.isLocalMaxima
+    ).filter(x => x.index <= curCandlestickIndex);
+
+    if(extrema.length < 3) { return false; }
+
+    const e1 = extrema[extrema.length - 3];
+    const e2 = extrema[extrema.length - 2];
+    const e3 = extrema[extrema.length - 1];
+    
+    if(!(
+      (e1.type === ExtremaType.MINIMA) &&
+      (e2.type === ExtremaType.MAXIMA) &&
+      (e3.type === ExtremaType.MINIMA)
+    )) {
+      return false;
+    }
+    
+    const lowsPriceIncreasePercent = (e3.value - e1.value) / e1.value;
+    const lowsPriceIncreasePercentPerCandlestick = lowsPriceIncreasePercent / (e3.index - e1.index);
+    const priceIncreasePercentPerCandlestickThreshold = 0.05 / 100;
+
+    return lowsPriceIncreasePercentPerCandlestick >= priceIncreasePercentPerCandlestickThreshold;
+  };
+  const shouldEnter4Extrema = () => {
     const extrema = areMinimaMaximaToExtremas(
       tradeAnalysis.lows, tradeAnalysis.isLocalMinima, tradeAnalysis.highs, tradeAnalysis.isLocalMaxima
     ).filter(x => x.index <= curCandlestickIndex);
@@ -578,12 +603,16 @@ function updateTradingAlgorithm(
     }
     
     const lowsPriceIncreasePercent = (e4.value - e2.value) / e2.value;
+    const lowsPriceIncreasePercentPerCandlestick = lowsPriceIncreasePercent / (e4.index - e2.index);
+
     const highsPriceIncreasePercent = (e3.value - e1.value) / e3.value;
-    const priceIncreasePercentThreshold = 0.005;
+    const highsPriceIncreasePercentPerCandlestick = highsPriceIncreasePercent / (e3.index - e1.index);
+
+    const priceIncreasePercentThresholdPerCandlestick = 0.05 / 100;
 
     return (
-      (lowsPriceIncreasePercent >= priceIncreasePercentThreshold) &&
-      (highsPriceIncreasePercent >= priceIncreasePercentThreshold)
+      (lowsPriceIncreasePercentPerCandlestick >= priceIncreasePercentThresholdPerCandlestick) &&
+      (highsPriceIncreasePercentPerCandlestick >= priceIncreasePercentThresholdPerCandlestick)
     );
   };
   const shouldEnter2 = () => {
@@ -605,7 +634,7 @@ function updateTradingAlgorithm(
     // look for entry
     if(curCandlestickIndex === 0) { return; }
 
-    if(shouldEnter()) {
+    if(shouldEnter4Extrema()) {
       const stopLossDropPercent = 1 / 100;
       const minTakeProfitRisePercent = 1 / 100;
 
@@ -788,6 +817,8 @@ class CandlestickMarker {
   constructor(public type: CandlestickMarkerType, public position: CandlestickMarkerPosition) {}
 }
 
+const COLUMN_HIGHLIGHT_FILL_STYLE = "rgba(0, 0, 0, 0.2)";
+
 interface CandlestickChartProps {
   tradeAnalysis: TradeAnalysis | null;
   opens: number[];
@@ -801,6 +832,7 @@ interface CandlestickChartProps {
   columnWidth: number;
   columnHorizontalPadding: number;
   scrollOffsetInColumns: number;
+  highlightedColumnIndex?: number;
 }
 class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
@@ -815,6 +847,9 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     return 1.01 * Math.max(...this.props.highs);
   }
 
+  iToIFromRight(i: number): number {
+    return this.iFromRightToI(i);
+  }
   iFromRightToI(iFromRight: number): number {
     if(!this.props.tradeAnalysis) { return 0; }
     
@@ -921,6 +956,14 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     this.context2d.clearRect(0, 0, this.props.width, this.props.height);
 
     if (this.props.tradeAnalysis) {
+      // draw highlighted column
+      if (this.props.highlightedColumnIndex !== undefined) {
+        const x = this.iFromRightToColumnX(this.iToIFromRight(this.props.highlightedColumnIndex), this.props.scrollOffsetInColumns);
+        const position = new Maths.Vector2(x, 0);
+        const fillStyle = COLUMN_HIGHLIGHT_FILL_STYLE;
+        Graphics.fillRect(this.context2d, position, this.props.columnWidth, this.props.height, fillStyle);
+      }
+
       // draw candlesticks
       for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
         this.drawCandlestick(iFromRight);
@@ -1012,6 +1055,7 @@ interface HistogramChartProps {
   columnWidth: number;
   columnHorizontalPadding: number;
   scrollOffsetInColumns: number;
+  highlightedColumnIndex?: number;
 }
 class HistogramChart extends React.Component<HistogramChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
@@ -1022,6 +1066,9 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
     return Math.max(...this.props.values);
   }
 
+  iToIFromRight(i: number): number {
+    return this.iFromRightToI(i);
+  }
   iFromRightToI(iFromRight: number): number {
     const rightmostCandlestickIndex = this.props.values.length - 1;
     const i = rightmostCandlestickIndex - iFromRight;
@@ -1046,6 +1093,14 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
     this.context2d.clearRect(0, 0, this.props.width, this.props.height);
 
     if (this.props.values) {
+      // draw highlighted column
+      if (this.props.highlightedColumnIndex !== undefined) {
+        const x = this.iFromRightToColumnX(this.iToIFromRight(this.props.highlightedColumnIndex), this.props.scrollOffsetInColumns);
+        const position = new Maths.Vector2(x, 0);
+        const fillStyle = COLUMN_HIGHLIGHT_FILL_STYLE;
+        Graphics.fillRect(this.context2d, position, this.props.columnWidth, this.props.height, fillStyle);
+      }
+
       // draw bars
       for (let iFromRight = 0; iFromRight < this.props.values.length; iFromRight++) {
         const i = this.iFromRightToI(iFromRight);
@@ -1098,11 +1153,15 @@ interface LineChartProps {
   columnWidth: number;
   columnHorizontalPadding: number;
   scrollOffsetInColumns: number;
+  highlightedColumnIndex?: number;
 }
 class LineChart extends React.Component<LineChartProps, {}> {
   canvasElement: HTMLCanvasElement | null;
   context2d: CanvasRenderingContext2D | null;
 
+  iToIFromRight(i: number): number {
+    return this.iFromRightToI(i);
+  }
   iFromRightToI(iFromRight: number): number {
     const rightmostCandlestickIndex = this.props.values.length - 1;
     const i = rightmostCandlestickIndex - iFromRight;
@@ -1145,6 +1204,14 @@ class LineChart extends React.Component<LineChartProps, {}> {
     if (this.context2d === null) { return; }
 
     this.context2d.clearRect(0, 0, this.props.width, this.props.height);
+
+    // draw highlighted column
+    if (this.props.highlightedColumnIndex !== undefined) {
+      const x = this.iFromRightToColumnX(this.iToIFromRight(this.props.highlightedColumnIndex), this.props.scrollOffsetInColumns);
+      const position = new Maths.Vector2(x, 0);
+      const fillStyle = COLUMN_HIGHLIGHT_FILL_STYLE;
+      Graphics.fillRect(this.context2d, position, this.props.columnWidth, this.props.height, fillStyle);
+    }
 
     // draw x-axis
     const xAxisY = this.valueToY(0);
@@ -1195,6 +1262,7 @@ function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: nu
 }
 
 interface AppState {
+  currentCurrency: string;
   tradeAnalysis: TradeAnalysis | null;
 
   usdBalance: number;
@@ -1230,6 +1298,7 @@ class App extends React.Component<{}, AppState> {
     super();
 
     this.state = {
+      currentCurrency: "BTC",
       tradeAnalysis: null,
 
       usdBalance: 0,
@@ -1250,6 +1319,10 @@ class App extends React.Component<{}, AppState> {
       showHeikinAshiCandlesticks: false,
       scrollOffsetInColumns: 0
     };
+  }
+
+  onCurrentCurrencyChange(event: any) {
+    this.setState({ currentCurrency: event.target.value });
   }
 
   onBuyUsdAmountChange(event: any) {
@@ -1340,7 +1413,7 @@ class App extends React.Component<{}, AppState> {
   }
 
   reloadCandlesticks() {
-    CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", 15)
+    CryptoCompare.loadAggregate1MinCandlesticks(this.state.currentCurrency, "USD", "Gemini", 15)
     .then(tradeAnalysis => {
       const lastOpenTime = this.state.tradeAnalysis
         ? this.state.tradeAnalysis.openTimes[this.state.tradeAnalysis.candlestickCount - 1]
@@ -1369,7 +1442,14 @@ class App extends React.Component<{}, AppState> {
         const tryBuyEth = () => {
           try {
             //this.onBuyEth();
-            console.log("Try real buy ETH!");
+            SMS.sendTextWithTwilio(
+              this.state.twilioAccountSid,
+              this.state.twilioAuthToken,
+              this.state.fromPhoneNumber,
+              this.state.toPhoneNumber,
+              "Buy"
+            );
+            console.log("Try real buy!");
             return true;
           } catch(e) {
             return false;
@@ -1378,7 +1458,14 @@ class App extends React.Component<{}, AppState> {
         const trySellEth = () => {
           try {
             //this.onBuyEth();
-            console.log("Try real sell ETH!");
+            SMS.sendTextWithTwilio(
+              this.state.twilioAccountSid,
+              this.state.twilioAuthToken,
+              this.state.fromPhoneNumber,
+              this.state.toPhoneNumber,
+              "Sell."
+            );
+            console.log("Try real sell!");
             return true;
           } catch(e) {
             return false;
@@ -1496,6 +1583,7 @@ class App extends React.Component<{}, AppState> {
     const columnHorizontalPadding = 1;
 
     const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
+    const highlightedColumnIndex = 1;
 
     let markers = new Array<Array<CandlestickMarker>>(this.state.tradeAnalysis.candlestickCount);
     for(let i = 0; i < markers.length; i++) {
@@ -1531,6 +1619,7 @@ class App extends React.Component<{}, AppState> {
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
+          highlightedColumnIndex={highlightedColumnIndex}
         />
 
         <HistogramChart
@@ -1542,36 +1631,7 @@ class App extends React.Component<{}, AppState> {
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <LineChart
-          chartTitle="Stochastic Close"
-          values={this.state.tradeAnalysis.stochasticClose}
-          width={800}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <LineChart
-          chartTitle="Stochastic Volume"
-          values={this.state.tradeAnalysis.stochasticVolume}
-          width={800}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <LineChart
-          chartTitle="Bullishness"
-          values={this.state.tradeAnalysis.bullishness}
-          width={800}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
+          highlightedColumnIndex={highlightedColumnIndex}
         />
 
         <LineChart
@@ -1582,16 +1642,7 @@ class App extends React.Component<{}, AppState> {
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <LineChart
-          chartTitle="Lin. Reg. % Close Slope * Volume"
-          values={this.state.tradeAnalysis.linRegSlopePctCloseMulVolumeMean}
-          width={800}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
+          highlightedColumnIndex={highlightedColumnIndex}
         />
       </div>
     );
@@ -1625,7 +1676,35 @@ class App extends React.Component<{}, AppState> {
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
         />
+        <LineChart
+          chartTitle="Stochastic Close"
+          values={this.state.tradeAnalysis.stochasticClose}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
 
+        <LineChart
+          chartTitle="Stochastic Volume"
+          values={this.state.tradeAnalysis.stochasticVolume}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Bullishness"
+          values={this.state.tradeAnalysis.bullishness}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
         
         <LineChart
           chartTitle="Lin. Reg. % Close Slope Concavity"
@@ -1636,9 +1715,19 @@ class App extends React.Component<{}, AppState> {
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
         />
+        <LineChart
+          chartTitle="Lin. Reg. % Close Slope * Volume"
+          values={this.state.tradeAnalysis.linRegSlopePctCloseMulVolumeMean}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
     */
   }
   render() {
+    const onCurrentCurrencyChange = this.onCurrentCurrencyChange.bind(this);
     const onBuyEth = this.onBuyEth.bind(this);
     const onSellEth = this.onSellEth.bind(this);
     const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
@@ -1656,6 +1745,10 @@ class App extends React.Component<{}, AppState> {
     return (
       <div className="App">
         <p>USD: {this.state.usdBalance} BTC: {this.state.btcBalance} ETH: {this.state.ethBalance}</p>
+        <select value={this.state.currentCurrency} onChange={onCurrentCurrencyChange}>
+          <option value="BTC">BTC</option>
+          <option value="ETH">ETH</option>
+        </select>
         {this.state.tradeAnalysis ? <p>Last: {this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1]}</p> : null}
         <div>
           <div>
