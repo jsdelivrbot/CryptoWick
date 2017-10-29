@@ -44,6 +44,10 @@ namespace Maths {
     constructor(public x: number, public y: number) {}
   }
 
+  export function divNoNaN(a: number, b: number) {
+    return (b !== 0) ? (a / b) : 0;
+  }
+
   export function transformValueInRange(min1: number, max1: number, min2: number, max2: number, value: number): number {
     const pctInRange = (value - min1) / (max1 - min1);
     return min2 + (pctInRange * (max2 - min2))
@@ -179,12 +183,49 @@ namespace Maths {
   export function meanArraySlice(values: number[], startIndex: number, valueCount: number): number {
     return sum(values, startIndex, valueCount) / valueCount;
   }
+  export function populationVariance(values: number[], startIndex: number, valueCount: number): number {
+    let result = 0;
+    const mean = meanArraySlice(values, startIndex, valueCount);
 
-  export function laggingReduce(
+    const exclusiveEndIndex = startIndex + valueCount;
+    for(let i = startIndex; i < exclusiveEndIndex; i++) {
+      const diffFromMean = values[i] - mean;
+      result += diffFromMean * diffFromMean;
+    }
+
+    result /= valueCount;
+    return result;
+  }
+  export function sampleVariance(values: number[], startIndex: number, valueCount: number): number {
+    let result = 0;
+    const mean = meanArraySlice(values, startIndex, valueCount);
+
+    const exclusiveEndIndex = startIndex + valueCount;
+    for(let i = startIndex; i < exclusiveEndIndex; i++) {
+      const diffFromMean = values[i] - mean;
+      result += diffFromMean * diffFromMean;
+    }
+
+    result /= (valueCount - 1);
+    return result;
+  }
+  export function populationStandardDeviation(values: number[], startIndex: number, valueCount: number): number {
+    return Math.sqrt(populationVariance(values, startIndex, valueCount));
+  }
+  export function sampleStandardDeviation(values: number[], startIndex: number, valueCount: number): number {
+    return Math.sqrt(sampleVariance(values, startIndex, valueCount));
+  }
+  export function inRangeInclusive(value: number, min: number, max: number) {
+    Debug.assert(max >= min);
+
+    return (value >= min) && (value <= max);
+  }
+
+  export function laggingReduce<T>(
     values: number[],
     lookbacklength: number,
-    reduceFunc: (values: number[], startIndex: number, count: number) => number
-  ): number[] {
+    reduceFunc: (values: number[], startIndex: number, count: number) => T
+  ): T[] {
     Debug.assert(values !== null);
     Debug.assert(lookbacklength > 0);
   
@@ -453,6 +494,9 @@ class TradeAnalysis {
   stochasticClose: number[];
   stochasticVolume: number[];
 
+  isVolumeAbnormal: boolean[];
+  didVolumeDrop: boolean[];
+
   bullishness: number[];
 
   constructor(
@@ -501,6 +545,24 @@ class TradeAnalysis {
 
       this.stochasticClose = Maths.stochasticOscillator(this.closes, linRegLookbackLength);
       this.stochasticVolume = Maths.stochasticOscillator(this.volumes, linRegLookbackLength);
+
+      this.isVolumeAbnormal = Maths.laggingReduce(this.volumes, linRegLookbackLength, (values, startIndex, count) => {
+        if(count < linRegLookbackLength) { return false; }
+
+        const mean = Maths.meanArraySlice(values, startIndex, count - 1);
+        const stdev = Maths.populationStandardDeviation(values, startIndex, count - 1);
+
+        return !Maths.inRangeInclusive(
+          this.volumes[startIndex + count - 1],
+          mean - (3 * stdev),
+          mean + (3 * stdev)
+        );
+      });
+
+      this.didVolumeDrop = new Array<boolean>(this.candlestickCount);
+      for(let i = 0; i < this.candlestickCount; i++) {
+        this.didVolumeDrop[i] = (i > 0) ? (Maths.divNoNaN(this.volumes[i], this.volumes[i - 1]) < 0.33) : false;
+      }
 
       this.bullishness = new Array<number>(this.candlestickCount);
       for(let i = 0; i < this.candlestickCount; i++) {
@@ -807,7 +869,9 @@ const MARKER_VERTICAL_MARGIN = 5;
 
 enum CandlestickMarkerType {
   SQUARE,
-  CIRCLE
+  CIRCLE,
+  TRIANGLE_UP,
+  TRIANGLE_DOWN
 }
 enum CandlestickMarkerPosition {
   ABOVE,
@@ -933,6 +997,7 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     const markerWidth = this.props.columnWidth - (2 * this.props.columnHorizontalPadding);
     const markerHeight = markerWidth;
     const markerLeftX = columnX + this.props.columnHorizontalPadding;
+    const markerRightX = columnX + this.props.columnWidth - this.props.columnHorizontalPadding;
     const markerCenterX = columnX + (this.props.columnWidth / 2);
     const fillStyle = "black";
 
@@ -946,6 +1011,28 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
         const squarePos = new Maths.Vector2(markerLeftX, topY);
         Graphics.fillRect(this.context2d, squarePos, markerWidth, markerHeight, fillStyle);
         break;
+      case CandlestickMarkerType.TRIANGLE_UP:
+        this.context2d.fillStyle = fillStyle;
+
+        this.context2d.moveTo(markerLeftX, topY + markerHeight);
+        this.context2d.lineTo(markerCenterX, topY);
+        this.context2d.lineTo(markerRightX, topY + markerHeight);
+        this.context2d.closePath();
+        this.context2d.fill();
+
+        break;
+      case CandlestickMarkerType.TRIANGLE_DOWN:
+        this.context2d.fillStyle = fillStyle;
+
+        this.context2d.moveTo(markerLeftX, topY );
+        this.context2d.lineTo(markerCenterX, topY + markerHeight);
+        this.context2d.lineTo(markerRightX, topY);
+        this.context2d.closePath();
+        this.context2d.fill();
+
+        break;
+      default:
+        throw new Error("Unknown CandlestickMarkerType");
     }
     
     topY += markerHeight + MARKER_VERTICAL_MARGIN;
@@ -1298,7 +1385,7 @@ class App extends React.Component<{}, AppState> {
     super();
 
     this.state = {
-      currentCurrency: "BTC",
+      currentCurrency: "ETH",
       tradeAnalysis: null,
 
       usdBalance: 0,
@@ -1477,6 +1564,16 @@ class App extends React.Component<{}, AppState> {
         if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(mostRecentOpenTime); }
         if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(mostRecentOpenTime); }
 
+        if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
+          SMS.sendTextWithTwilio(
+            this.state.twilioAccountSid,
+            this.state.twilioAuthToken,
+            this.state.fromPhoneNumber,
+            this.state.toPhoneNumber,
+            "Abnormal volume."
+          );
+        }
+
         /*const isEntrySignal = false;
         if (isEntrySignal && this.state.twilioAccountSid) {
           sendTextWithTwilio(
@@ -1601,6 +1698,13 @@ class App extends React.Component<{}, AppState> {
       }
       if(this.state.tradeAnalysis.isLocalMaxima[i]) {
         markers[i].push(new CandlestickMarker(CandlestickMarkerType.CIRCLE, CandlestickMarkerPosition.ABOVE));
+      }
+
+      if(this.state.tradeAnalysis.isVolumeAbnormal[i]) {
+        markers[i].push(new CandlestickMarker(CandlestickMarkerType.TRIANGLE_UP, CandlestickMarkerPosition.BELOW));
+      }
+      if(this.state.tradeAnalysis.didVolumeDrop[i]) {
+        markers[i].push(new CandlestickMarker(CandlestickMarkerType.TRIANGLE_DOWN, CandlestickMarkerPosition.ABOVE));
       }
     }
 
