@@ -898,6 +898,13 @@ class CandlestickMarker {
 
 const COLUMN_HIGHLIGHT_FILL_STYLE = "rgba(0, 0, 0, 0.2)";
 
+function iFromRightToColumnX(chartWidth: number, columnWidth: number, scrollOffsetInColumns: number, iFromRight: number): number {
+  const rightmostColumnX = chartWidth - columnWidth;
+  const columnX = rightmostColumnX - ((iFromRight + scrollOffsetInColumns) * columnWidth);
+
+  return columnX;
+}
+
 interface CandlestickChartProps {
   tradeAnalysis: TradeAnalysis | null;
   opens: number[];
@@ -937,12 +944,6 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
 
     return i;
   }
-  iFromRightToColumnX(iFromRight: number, scrollOffsetInColumns: number): number {
-    const rightmostColumnX = this.props.width - this.props.columnWidth;
-    const columnX = rightmostColumnX - ((iFromRight + scrollOffsetInColumns) * this.props.columnWidth);
-
-    return columnX;
-  }
   priceToY(price: number): number {
     const priceRange = this.maxPrice - this.minPrice;
     const yPercentFromBottom = (price - this.minPrice) / priceRange;
@@ -954,7 +955,7 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     if(!this.props.tradeAnalysis || !this.context2d) { return; }
     
     const i = this.iFromRightToI(iFromRight);
-    const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
+    const columnX = iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight);
 
     const open = this.props.opens[i];
     const high = this.props.highs[i];
@@ -997,11 +998,11 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
 
     const lineStartClose = this.props.closes[this.props.closes.length - windowSize];
     const lineStartPoint = new Maths.Vector2(
-      this.iFromRightToColumnX(windowSize - 1, this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2),
+      iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, windowSize - 1) + (this.props.columnWidth / 2),
       this.priceToY(lineOfBestFit.b)
     );
     const lineEndPoint = new Maths.Vector2(
-      this.iFromRightToColumnX(0, this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2),
+      iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, 0) + (this.props.columnWidth / 2),
       this.priceToY((lineOfBestFit.m * (windowSize - 1)) + lineOfBestFit.b)
     );
     Graphics.strokeLine(this.context2d, lineStartPoint, lineEndPoint, "rgba(0, 0, 0, 0.3)");
@@ -1070,7 +1071,7 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     if (this.props.tradeAnalysis) {
       // draw highlighted column
       if (this.props.highlightedColumnIndex !== undefined) {
-        const x = this.iFromRightToColumnX(this.iToIFromRight(this.props.highlightedColumnIndex), this.props.scrollOffsetInColumns);
+        const x = iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, this.iToIFromRight(this.props.highlightedColumnIndex));
         const position = new Maths.Vector2(x, 0);
         const fillStyle = COLUMN_HIGHLIGHT_FILL_STYLE;
         Graphics.fillRect(this.context2d, position, this.props.columnWidth, this.props.height, fillStyle);
@@ -1085,7 +1086,7 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
       if(this.props.markers) {
         for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
           const i = this.iFromRightToI(iFromRight);
-          const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
+          const columnX = iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight);
   
           const markerWidth = this.props.columnWidth - (2 * this.props.columnHorizontalPadding);
           const markerHeight = markerWidth;
@@ -1123,8 +1124,8 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
         const iFromRight = (candlestickCount - 1) - index;
 
         return new Maths.Vector2(
-          this.iFromRightToColumnX(iFromRight,
-            this.props.scrollOffsetInColumns) + (this.props.columnWidth / 2), this.priceToY(value)
+          iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight) + (this.props.columnWidth / 2),
+          this.priceToY(value)
         );
       });
       //strokePolyline(this.context2d, smaPoints, "black");
@@ -1187,12 +1188,6 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
 
     return i;
   }
-  iFromRightToColumnX(iFromRight: number, scrollOffsetInColumns: number): number {
-    const rightmostColumnX = this.props.width - this.props.columnWidth;
-    const columnX = rightmostColumnX - ((iFromRight + scrollOffsetInColumns) * this.props.columnWidth);
-
-    return columnX;
-  }
   valueToY(value: number): number {
     const yPercentFromBottom = value / this.maxValue;
     const yFromBottom = yPercentFromBottom * this.props.height;
@@ -1207,7 +1202,8 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
     if (this.props.values) {
       // draw highlighted column
       if (this.props.highlightedColumnIndex !== undefined) {
-        const x = this.iFromRightToColumnX(this.iToIFromRight(this.props.highlightedColumnIndex), this.props.scrollOffsetInColumns);
+        
+        const x = iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, this.iToIFromRight(this.props.highlightedColumnIndex));
         const position = new Maths.Vector2(x, 0);
         const fillStyle = COLUMN_HIGHLIGHT_FILL_STYLE;
         Graphics.fillRect(this.context2d, position, this.props.columnWidth, this.props.height, fillStyle);
@@ -1216,7 +1212,7 @@ class HistogramChart extends React.Component<HistogramChartProps, {}> {
       // draw bars
       for (let iFromRight = 0; iFromRight < this.props.values.length; iFromRight++) {
         const i = this.iFromRightToI(iFromRight);
-        const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
+        const columnX = iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight);
 
         const value = this.props.values[i];
 
@@ -1280,12 +1276,6 @@ class LineChart extends React.Component<LineChartProps, {}> {
 
     return i;
   }
-  iFromRightToColumnX(iFromRight: number, scrollOffsetInColumns: number): number {
-    const rightmostColumnX = this.props.width - this.props.columnWidth;
-    const columnX = rightmostColumnX - ((iFromRight + scrollOffsetInColumns) * this.props.columnWidth);
-
-    return columnX;
-  }
   valueToY(value: number): number {
     const maxAbsValue = Math.max(...this.props.values.map(Math.abs));
     const minValue = -maxAbsValue;
@@ -1303,7 +1293,7 @@ class LineChart extends React.Component<LineChartProps, {}> {
 
     for (let iFromRight = 0; iFromRight < points.length; iFromRight++) {
       const i = this.iFromRightToI(iFromRight);
-      const columnX = this.iFromRightToColumnX(iFromRight, this.props.scrollOffsetInColumns);
+      const columnX = iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight);
       const value = this.props.values[i];
 
       const point = new Maths.Vector2(columnX + (this.props.columnWidth / 2), this.valueToY(value));
@@ -1319,7 +1309,7 @@ class LineChart extends React.Component<LineChartProps, {}> {
 
     // draw highlighted column
     if (this.props.highlightedColumnIndex !== undefined) {
-      const x = this.iFromRightToColumnX(this.iToIFromRight(this.props.highlightedColumnIndex), this.props.scrollOffsetInColumns);
+      const x = iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, this.iToIFromRight(this.props.highlightedColumnIndex));
       const position = new Maths.Vector2(x, 0);
       const fillStyle = COLUMN_HIGHLIGHT_FILL_STYLE;
       Graphics.fillRect(this.context2d, position, this.props.columnWidth, this.props.height, fillStyle);
