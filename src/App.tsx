@@ -290,7 +290,16 @@ namespace Graphics {
       context2d.fillStyle = fillStyle;
       context2d.fill();
   }
-  export function fillText(context2d: CanvasRenderingContext2D, text: string, position: Maths.Vector2, fillStyle: string) {
+  export function fillText(
+    context2d: CanvasRenderingContext2D,
+    text: string,
+    position: Maths.Vector2,
+    fillStyle: string,
+    alignment: string = "start",
+    baseline: string = "alphabetic"
+  ) {
+    context2d.textAlign = alignment;
+    context2d.textBaseline = baseline;
     context2d.fillStyle = fillStyle;
     context2d.fillText(text, position.x, position.y);
   }
@@ -871,14 +880,20 @@ enum CandlestickMarkerType {
   SQUARE,
   CIRCLE,
   TRIANGLE_UP,
-  TRIANGLE_DOWN
+  TRIANGLE_DOWN,
+  LETTER
 }
 enum CandlestickMarkerPosition {
   ABOVE,
   BELOW
 }
 class CandlestickMarker {
-  constructor(public type: CandlestickMarkerType, public position: CandlestickMarkerPosition) {}
+  constructor(
+    public type: CandlestickMarkerType,
+    public position: CandlestickMarkerPosition,
+    public fillStyle: string,
+    public letter?: string
+  ) {}
 }
 
 const COLUMN_HIGHLIGHT_FILL_STYLE = "rgba(0, 0, 0, 0.2)";
@@ -999,7 +1014,7 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
     const markerLeftX = columnX + this.props.columnHorizontalPadding;
     const markerRightX = columnX + this.props.columnWidth - this.props.columnHorizontalPadding;
     const markerCenterX = columnX + (this.props.columnWidth / 2);
-    const fillStyle = "black";
+    const fillStyle = marker.fillStyle;
 
     switch(marker.type) {
       case CandlestickMarkerType.CIRCLE:
@@ -1012,8 +1027,10 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
         Graphics.fillRect(this.context2d, squarePos, markerWidth, markerHeight, fillStyle);
         break;
       case CandlestickMarkerType.TRIANGLE_UP:
+        this.context2d.strokeStyle = fillStyle;
         this.context2d.fillStyle = fillStyle;
 
+        this.context2d.beginPath();
         this.context2d.moveTo(markerLeftX, topY + markerHeight);
         this.context2d.lineTo(markerCenterX, topY);
         this.context2d.lineTo(markerRightX, topY + markerHeight);
@@ -1022,14 +1039,22 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
 
         break;
       case CandlestickMarkerType.TRIANGLE_DOWN:
+        this.context2d.strokeStyle = fillStyle;
         this.context2d.fillStyle = fillStyle;
 
-        this.context2d.moveTo(markerLeftX, topY );
+        this.context2d.beginPath();
+        this.context2d.moveTo(markerLeftX, topY);
         this.context2d.lineTo(markerCenterX, topY + markerHeight);
         this.context2d.lineTo(markerRightX, topY);
         this.context2d.closePath();
         this.context2d.fill();
 
+        break;
+      case CandlestickMarkerType.LETTER:
+        if(!marker.letter) { break; }
+        
+        const letterPos = new Maths.Vector2(markerLeftX, topY);
+        Graphics.fillText(this.context2d, marker.letter, letterPos, fillStyle, "start", "top");
         break;
       default:
         throw new Error("Unknown CandlestickMarkerType");
@@ -1688,24 +1713,53 @@ class App extends React.Component<{}, AppState> {
       markers[i] = new Array<CandlestickMarker>();
 
       if(areEntryPoints[i]) {
-        markers[i].push(new CandlestickMarker(CandlestickMarkerType.SQUARE, CandlestickMarkerPosition.BELOW));
+        markers[i].push(new CandlestickMarker(
+          CandlestickMarkerType.LETTER,
+          CandlestickMarkerPosition.BELOW,
+          "black",
+          "B"
+        ));
       }
-      if(this.state.tradeAnalysis.isLocalMinima[i]) {
-        markers[i].push(new CandlestickMarker(CandlestickMarkerType.CIRCLE, CandlestickMarkerPosition.BELOW));
+      if(areExitPoints[i]) {
+        markers[i].push(new CandlestickMarker(
+          CandlestickMarkerType.LETTER,
+          CandlestickMarkerPosition.ABOVE,
+          "black",
+          "S"
+        ));
       }
 
-      if(areExitPoints[i]) {
-        markers[i].push(new CandlestickMarker(CandlestickMarkerType.SQUARE, CandlestickMarkerPosition.ABOVE));
+      if(this.state.tradeAnalysis.isLocalMinima[i]) {
+        markers[i].push(new CandlestickMarker(
+          CandlestickMarkerType.TRIANGLE_DOWN,
+          CandlestickMarkerPosition.BELOW,
+          "green"
+        ));
       }
+
       if(this.state.tradeAnalysis.isLocalMaxima[i]) {
-        markers[i].push(new CandlestickMarker(CandlestickMarkerType.CIRCLE, CandlestickMarkerPosition.ABOVE));
+        markers[i].push(new CandlestickMarker(
+          CandlestickMarkerType.TRIANGLE_UP,
+          CandlestickMarkerPosition.ABOVE,
+          "red"
+        ));
       }
 
       if(this.state.tradeAnalysis.isVolumeAbnormal[i]) {
-        markers[i].push(new CandlestickMarker(CandlestickMarkerType.TRIANGLE_UP, CandlestickMarkerPosition.BELOW));
+        markers[i].push(new CandlestickMarker(
+          CandlestickMarkerType.LETTER,
+          CandlestickMarkerPosition.BELOW,
+          "black",
+          "V"
+        ));
       }
       if(this.state.tradeAnalysis.didVolumeDrop[i]) {
-        markers[i].push(new CandlestickMarker(CandlestickMarkerType.TRIANGLE_DOWN, CandlestickMarkerPosition.ABOVE));
+        markers[i].push(new CandlestickMarker(
+          CandlestickMarkerType.LETTER,
+          CandlestickMarkerPosition.ABOVE,
+          "red",
+          "V"
+        ));
       }
     }
 
