@@ -380,10 +380,10 @@ namespace Gemini {
         };
       });
   }
-  export function buyEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
+  export function buyCurrencyThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
     geminiNewOrder(apiKey, apiSecret, symbol, "buy", amount, price);
   }
-  export function sellEthThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
+  export function sellCurrencyThroughGemini(apiKey: string, apiSecret: string, symbol: string, amount: number, price: number) {
     geminiNewOrder(apiKey, apiSecret, symbol, "sell", amount, price);
   }
   export function geminiNewOrder(apiKey: string, apiSecret: string, symbol: string, side: string, amount: number, price: number) {
@@ -561,7 +561,7 @@ class TradeAnalysis {
 
       this.didVolumeDrop = new Array<boolean>(this.candlestickCount);
       for(let i = 0; i < this.candlestickCount; i++) {
-        this.didVolumeDrop[i] = (i > 0) ? (Maths.divNoNaN(this.volumes[i], this.volumes[i - 1]) < 0.33) : false;
+        this.didVolumeDrop[i] = (i > 0) ? (Maths.divNoNaN(this.volumes[i], this.volumes[i - 1]) < 0.5) : false;
       }
 
       this.bullishness = new Array<number>(this.candlestickCount);
@@ -1357,7 +1357,7 @@ interface AppState {
   ethBalance: number;
 
   buyUsdAmount: string;
-  sellEthAmount: string;
+  sellCurrencyAmount: string;
 
   geminiApiKey: string;
   geminiApiSecret: string;
@@ -1385,7 +1385,7 @@ class App extends React.Component<{}, AppState> {
     super();
 
     this.state = {
-      currentCurrency: "ETH",
+      currentCurrency: "BTC",
       tradeAnalysis: null,
 
       usdBalance: 0,
@@ -1393,7 +1393,7 @@ class App extends React.Component<{}, AppState> {
       ethBalance: 0,
 
       buyUsdAmount: "",
-      sellEthAmount: "",
+      sellCurrencyAmount: "",
 
       geminiApiKey: "",
       geminiApiSecret: "",
@@ -1409,39 +1409,40 @@ class App extends React.Component<{}, AppState> {
   }
 
   onCurrentCurrencyChange(event: any) {
-    this.setState({ currentCurrency: event.target.value });
+    this.setState({ currentCurrency: event.target.value }, this.reloadCandlesticks);
   }
 
   onBuyUsdAmountChange(event: any) {
     this.setState({ buyUsdAmount: event.target.value });
   }
-  onBuyEth() {
+  
+  onSellCurrencyAmountChange(event: any) {
+    this.setState({ sellCurrencyAmount: event.target.value });
+  }
+
+  buyCurrency() {
     if(!this.state.tradeAnalysis) { return; }
 
     const lastPrice = this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1];
 
-    const buyEthAmount = parseFloat((parseFloat(this.state.buyUsdAmount) / lastPrice).toFixed(5));
-    if(isNaN(buyEthAmount)) { return; }
+    const buyCurrencyAmount = parseFloat((parseFloat(this.state.buyUsdAmount) / lastPrice).toFixed(5));
+    if(isNaN(buyCurrencyAmount)) { return; }
 
     const price = lastPrice * 2;
 
-    Gemini.buyEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", buyEthAmount, price);
+    Gemini.buyCurrencyThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, `${this.state.currentCurrency}USD`, buyCurrencyAmount, price);
   }
-
-  onSellEthAmountChange(event: any) {
-    this.setState({ sellEthAmount: event.target.value });
-  }
-  onSellEth() {
+  sellCurrency() {
     if(!this.state.tradeAnalysis) { return; }
 
     const lastPrice = this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1];
     
-    const sellEthAmount = parseFloat(this.state.sellEthAmount);
-    if(isNaN(sellEthAmount)) { return; }
+    const sellCurrencyAmount = parseFloat(this.state.sellCurrencyAmount);
+    if(isNaN(sellCurrencyAmount)) { return; }
 
     const price = lastPrice / 2;
 
-    Gemini.sellEthThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, "ETHUSD", sellEthAmount, price);
+    Gemini.sellCurrencyThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, `${this.state.currentCurrency}USD`, sellCurrencyAmount, price);
   }
 
   onGeminiApiKeyChange(event: any) {
@@ -1515,20 +1516,20 @@ class App extends React.Component<{}, AppState> {
 
       if (isNewAnalysis) {
         if(lastOpenTime === null) {
-          const fakeBuyEth = () => true;
-          const fakeSellEth = () => true;
+          const fakeBuyCurrency = () => true;
+          const fakeSellCurrency = () => true;
 
           for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
             const wasInTrade = this.tradingAlgoState.isInTrade;
-            updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i, fakeBuyEth, fakeSellEth);
+            updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency);
             if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
             if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
           }
         }
 
-        const tryBuyEth = () => {
+        const tryBuyCurrency = () => {
           try {
-            //this.onBuyEth();
+            //this.buyCurrency();
             SMS.sendTextWithTwilio(
               this.state.twilioAccountSid,
               this.state.twilioAuthToken,
@@ -1542,9 +1543,9 @@ class App extends React.Component<{}, AppState> {
             return false;
           }
         };
-        const trySellEth = () => {
+        const trySellCurrency = () => {
           try {
-            //this.onBuyEth();
+            //this.sellCurrency();
             SMS.sendTextWithTwilio(
               this.state.twilioAccountSid,
               this.state.twilioAuthToken,
@@ -1560,7 +1561,7 @@ class App extends React.Component<{}, AppState> {
         };
 
         const wasInTrade = this.tradingAlgoState.isInTrade;
-        updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyEth, trySellEth);
+        updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency);
         if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(mostRecentOpenTime); }
         if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(mostRecentOpenTime); }
 
@@ -1832,10 +1833,10 @@ class App extends React.Component<{}, AppState> {
   }
   render() {
     const onCurrentCurrencyChange = this.onCurrentCurrencyChange.bind(this);
-    const onBuyEth = this.onBuyEth.bind(this);
-    const onSellEth = this.onSellEth.bind(this);
+    const buyCurrency = this.buyCurrency.bind(this);
+    const sellCurrency = this.sellCurrency.bind(this);
     const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
-    const onSellEthAmountChange = this.onSellEthAmountChange.bind(this);
+    const onSellCurrencyAmountChange = this.onSellCurrencyAmountChange.bind(this);
     const onGeminiApiKeyChange = this.onGeminiApiKeyChange.bind(this);
     const onGeminiApiSecretChange = this.onGeminiApiSecretChange.bind(this);
     const onTwilioAccountSidChange = this.onTwilioAccountSidChange.bind(this);
@@ -1856,15 +1857,15 @@ class App extends React.Component<{}, AppState> {
         {this.state.tradeAnalysis ? <p>Last: {this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1]}</p> : null}
         <div>
           <div>
-            Buy USD Amount
+            Buy Amount (USD)
             <input type="text" value={this.state.buyUsdAmount} onChange={onBuyUsdAmountChange} />
-            <button onClick={onBuyEth}>Buy</button>
+            <button onClick={buyCurrency}>Buy</button>
           </div>
 
           <div>
-            Sell ETH Amount
-            <input type="text" value={this.state.sellEthAmount} onChange={onSellEthAmountChange} />
-            <button onClick={onSellEth}>Sell</button>
+            Sell Amount ({this.state.currentCurrency})
+            <input type="text" value={this.state.sellCurrencyAmount} onChange={onSellCurrencyAmountChange} />
+            <button onClick={sellCurrency}>Sell</button>
           </div>
         </div>
         <div><input type="checkbox" checked={this.state.showHeikinAshiCandlesticks} onChange={onShowHeikinAshiCandlesticksChange} /> Show Heikin-Ashi</div>
