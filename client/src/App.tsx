@@ -1577,8 +1577,28 @@ class App extends React.Component<{}, AppState> {
 
         const wasInTrade = this.tradingAlgoState.isInTrade;
         updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency);
-        if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(mostRecentOpenTime); }
-        if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(mostRecentOpenTime); }
+        if(!wasInTrade && this.tradingAlgoState.isInTrade) {
+          this.entryPointOpenTimes.push(mostRecentOpenTime);
+
+          SMS.sendTextWithTwilio(
+            this.state.twilioAccountSid,
+            this.state.twilioAuthToken,
+            this.state.fromPhoneNumber,
+            this.state.toPhoneNumber,
+            "Entry signal."
+          );
+        }
+        if(wasInTrade && !this.tradingAlgoState.isInTrade) {
+          this.exitPointOpenTimes.push(mostRecentOpenTime);
+
+          SMS.sendTextWithTwilio(
+            this.state.twilioAccountSid,
+            this.state.twilioAuthToken,
+            this.state.fromPhoneNumber,
+            this.state.toPhoneNumber,
+            "Exit signal."
+          );
+        }
 
         if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
           SMS.sendTextWithTwilio(
@@ -1589,28 +1609,6 @@ class App extends React.Component<{}, AppState> {
             "Abnormal volume."
           );
         }
-
-        /*const isEntrySignal = false;
-        if (isEntrySignal && this.state.twilioAccountSid) {
-          sendTextWithTwilio(
-            this.state.twilioAccountSid,
-            this.state.twilioAuthToken,
-            this.state.fromPhoneNumber,
-            this.state.toPhoneNumber,
-            "Entry signal."
-          );
-        }
-
-        const isExitSignal = tradeAnalysis.isBearish[tradeAnalysis.candlestickCount - 1];
-        if (isExitSignal && this.state.twilioAccountSid) {
-          sendTextWithTwilio(
-            this.state.twilioAccountSid,
-            this.state.twilioAuthToken,
-            this.state.fromPhoneNumber,
-            this.state.toPhoneNumber,
-            "Exit signal."
-          );
-        }*/
       }
     });
   }
@@ -1968,4 +1966,3 @@ function nextNonce(): number {
 
   return newNonce;
 }
-
