@@ -723,19 +723,23 @@ function updateTradingAlgorithm(
     return isBearishMinus2 && isBullishMinus1 && isGreenNonHeikin && isBullishEnough;
   };
 
+  const shouldExitStopLoss = () => {
+    return curPrice <= state.stopLossPrice;
+  };
   const shouldExitTrailingStopLoss = () => {
     return curPrice <= state.trailingStopLossPrice;
   };
-
+  
   const shouldEnter = shouldEnterSmaPositive;
-  const shouldExit = shouldExitSmaNegative;
+  const shouldExit = () => shouldExitSmaNegative();
+  // NOTE: if using stop losses, refreshing the page loses stop loss price levels!!!
 
   if(!state.isInTrade) {
     // look for entry
     if(curCandlestickIndex === 0) { return; }
 
     if(shouldEnter()) {
-      const stopLossDropPercent = 1 / 100;
+      const stopLossDropPercent = 2 / 100;
       const minTakeProfitRisePercent = 1 / 100;
 
       state.stopLossPrice = (1 - stopLossDropPercent) * curPrice;
@@ -1382,7 +1386,6 @@ class LineChart extends React.Component<LineChartProps, {}> {
   }
 }
 
-
 function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: number): number[] {
   return closes.map((close, closeIndex) => {
     const startCandlestickIndex = Math.max(closeIndex - (linRegCandleCount - 1), 0);
@@ -1420,6 +1423,7 @@ interface AppState {
   toPhoneNumber: string;
 
   showHeikinAshiCandlesticks: boolean;
+  useFakeHistoricalTrades: boolean;
   scrollOffsetInColumns: number;
 }
 
@@ -1456,6 +1460,8 @@ class App extends React.Component<{}, AppState> {
       toPhoneNumber: "+1",
 
       showHeikinAshiCandlesticks: false,
+      useFakeHistoricalTrades: false,
+
       scrollOffsetInColumns: 0
     };
   }
@@ -1568,27 +1574,22 @@ class App extends React.Component<{}, AppState> {
 
       if (isNewAnalysis) {
         if(lastOpenTime === null) {
-          const fakeBuyCurrency = () => true;
-          const fakeSellCurrency = () => true;
-
-          for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
-            const wasInTrade = this.tradingAlgoState.isInTrade;
-            updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency);
-            if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
-            if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
+          if(this.state.useFakeHistoricalTrades) {
+            const fakeBuyCurrency = () => true;
+            const fakeSellCurrency = () => true;
+  
+            for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
+              const wasInTrade = this.tradingAlgoState.isInTrade;
+              updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency);
+              if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
+              if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
+            }
           }
         }
 
         const tryBuyCurrency = () => {
           try {
             //this.buyCurrency();
-            SMS.sendTextWithTwilio(
-              this.state.twilioAccountSid,
-              this.state.twilioAuthToken,
-              this.state.fromPhoneNumber,
-              this.state.toPhoneNumber,
-              "Buy"
-            );
             console.log("Try real buy!");
             return true;
           } catch(e) {
@@ -1598,13 +1599,6 @@ class App extends React.Component<{}, AppState> {
         const trySellCurrency = () => {
           try {
             //this.sellCurrency();
-            SMS.sendTextWithTwilio(
-              this.state.twilioAccountSid,
-              this.state.twilioAuthToken,
-              this.state.fromPhoneNumber,
-              this.state.toPhoneNumber,
-              "Sell."
-            );
             console.log("Try real sell!");
             return true;
           } catch(e) {
@@ -1622,7 +1616,7 @@ class App extends React.Component<{}, AppState> {
             this.state.twilioAuthToken,
             this.state.fromPhoneNumber,
             this.state.toPhoneNumber,
-            "Entry signal."
+            "Bought"
           );
         }
         if(wasInTrade && !this.tradingAlgoState.isInTrade) {
@@ -1633,7 +1627,7 @@ class App extends React.Component<{}, AppState> {
             this.state.twilioAuthToken,
             this.state.fromPhoneNumber,
             this.state.toPhoneNumber,
-            "Exit signal."
+            "Sold"
           );
         }
 
@@ -1646,6 +1640,9 @@ class App extends React.Component<{}, AppState> {
             "Abnormal volume."
           );
         }
+        
+        // Update after running trading algorithm.
+        this.forceUpdate();
       }
     });
   }
@@ -1664,22 +1661,27 @@ class App extends React.Component<{}, AppState> {
       });
     }
 
-    if(settings && settings.twilioAccountSid) {
-      this.reloadCandlesticks();
-      this.refreshCandlesticksIntervalHandle = setInterval(
-        this.reloadCandlesticks.bind(this),
-        1000 * this.refreshIntervalSeconds
-      );
-    }
-
     if(settings && settings.geminiApiKey) {
       Gemini.loadGeminiBalances(settings.geminiApiKey, settings.geminiApiSecret)
         .then(json => {
-          this.setState({
+          const newState = {
             usdBalance: json.USD,
             btcBalance: json.BTC,
             ethBalance: json.ETH
-          });
+          };
+          this.setState(newState);
+
+          if(newState.btcBalance > 0.01) {
+            this.tradingAlgoState.isInTrade = true;
+          }
+
+          if(settings.twilioAccountSid) {
+            this.reloadCandlesticks();
+            this.refreshCandlesticksIntervalHandle = setInterval(
+              this.reloadCandlesticks.bind(this),
+              1000 * this.refreshIntervalSeconds
+            );
+          }
         });
     }
 
@@ -1923,6 +1925,7 @@ class App extends React.Component<{}, AppState> {
     return (
       <div className="App">
         <p>USD: {this.state.usdBalance} BTC: {this.state.btcBalance} ETH: {this.state.ethBalance}</p>
+        <p>{this.tradingAlgoState.isInTrade ? "IN TRADE" : "NOT IN TRADE"}</p>
         <select value={this.state.currentCurrency} onChange={onCurrentCurrencyChange}>
           <option value="BTC">BTC</option>
           <option value="ETH">ETH</option>
