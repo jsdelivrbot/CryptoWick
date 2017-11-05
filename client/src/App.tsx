@@ -496,9 +496,13 @@ class TradeAnalysis {
   linRegSlopePctCloseConcavity: number[];
   linRegSlopePctCloseMulVolumeMean: number[];
 
+  sma50: number[];
+  sma50Derivative1st: number[];
+  sma50Derivative2nd: number[];
+
   sma20: number[];
-  sma1stDerivative: number[];
-  sma2ndDerivative: number[];
+  sma20Derivative1st: number[];
+  sma20Derivative2nd: number[];
 
   stochasticClose: number[];
   stochasticVolume: number[];
@@ -548,9 +552,13 @@ class TradeAnalysis {
         (e1, e2) => e1 * e2
       );
 
-      this.sma20 = Maths.laggingSimpleMovingAverage(this.closes, linRegLookbackLength);
-      this.sma1stDerivative = Maths.movingDerivative(this.sma20, 1);
-      this.sma2ndDerivative = Maths.movingSecondDerivative(this.sma20, 1);
+      this.sma20 = Maths.laggingSimpleMovingAverage(this.closes, 20);
+      this.sma20Derivative1st = Maths.movingDerivative(this.sma20, 1);
+      this.sma20Derivative2nd = Maths.movingSecondDerivative(this.sma20, 1);
+
+      this.sma50 = Maths.laggingSimpleMovingAverage(this.closes, 50);
+      this.sma50Derivative1st = Maths.movingDerivative(this.sma50, 1);
+      this.sma50Derivative2nd = Maths.movingSecondDerivative(this.sma50, 1);
 
       this.stochasticClose = Maths.stochasticOscillator(this.closes, linRegLookbackLength);
       this.stochasticVolume = Maths.stochasticOscillator(this.volumes, linRegLookbackLength);
@@ -627,6 +635,23 @@ function updateTradingAlgorithm(
 ) {
   const curPrice = tradeAnalysis.closes[curCandlestickIndex];
 
+  const smaDerivativePctCloseThreshold = 0.04 / 100;
+
+  const shouldEnterSmaPositive = () => {
+    const ddt = tradeAnalysis.sma50Derivative1st[curCandlestickIndex];
+    const close = tradeAnalysis.closes[curCandlestickIndex];
+    const sma50DerivativePctClose = ddt / close;
+
+    return sma50DerivativePctClose >= smaDerivativePctCloseThreshold;
+  };
+  const shouldExitSmaNegative = () => {
+    const ddt = tradeAnalysis.sma50Derivative1st[curCandlestickIndex];
+    const close = tradeAnalysis.closes[curCandlestickIndex];
+    const sma50DerivativePctClose = ddt / close;
+    
+    return sma50DerivativePctClose <= -smaDerivativePctCloseThreshold;
+  };
+
   const shouldEnter3Extrema = () => {
     const extrema = areMinimaMaximaToExtremas(
       tradeAnalysis.lows, tradeAnalysis.isLocalMinima, tradeAnalysis.highs, tradeAnalysis.isLocalMaxima
@@ -697,15 +722,19 @@ function updateTradingAlgorithm(
 
     return isBearishMinus2 && isBullishMinus1 && isGreenNonHeikin && isBullishEnough;
   };
-  const shouldExit = () => {
+
+  const shouldExitTrailingStopLoss = () => {
     return curPrice <= state.trailingStopLossPrice;
   };
+
+  const shouldEnter = shouldEnterSmaPositive;
+  const shouldExit = shouldExitSmaNegative;
 
   if(!state.isInTrade) {
     // look for entry
     if(curCandlestickIndex === 0) { return; }
 
-    if(shouldEnter4Extrema()) {
+    if(shouldEnter()) {
       const stopLossDropPercent = 1 / 100;
       const minTakeProfitRisePercent = 1 / 100;
 
@@ -913,6 +942,7 @@ interface CandlestickChartProps {
   closes: number[];
   volumes: number[];
   markers?: CandlestickMarker[][];
+  lines?: number[][];
   width: number;
   height: number;
   columnWidth: number;
@@ -1118,17 +1148,24 @@ class CandlestickChart extends React.Component<CandlestickChartProps, {}> {
         }
       }
 
-      // draw SMA
-      const candlestickCount = this.props.tradeAnalysis.candlestickCount;
-      const smaPoints = this.props.tradeAnalysis.sma20.map((value, index) => {
-        const iFromRight = (candlestickCount - 1) - index;
+      // lines
+      if(this.props.lines) {
+        this.props.lines.forEach(prices => {
+          const candlestickCount = prices.length;
+          const points = prices.map((value, index) => {
+            const iFromRight = (candlestickCount - 1) - index;
+    
+            return new Maths.Vector2(
+              iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight) + (this.props.columnWidth / 2),
+              this.priceToY(value)
+            );
+          });
 
-        return new Maths.Vector2(
-          iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight) + (this.props.columnWidth / 2),
-          this.priceToY(value)
-        );
-      });
-      //strokePolyline(this.context2d, smaPoints, "black");
+          if (this.context2d) {
+            Graphics.strokePolyline(this.context2d, points, "black");
+          }
+        });
+      }
 
       // draw linear regression lines
       const linRegWindowSizes = [5, 10, 15, 20, 25, 30, 60];
@@ -1690,7 +1727,7 @@ class App extends React.Component<{}, AppState> {
         )
       : [];
     
-    const columnWidth = 10;
+    const columnWidth = 7;
     const columnHorizontalPadding = 1;
 
     const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
@@ -1717,7 +1754,7 @@ class App extends React.Component<{}, AppState> {
         ));
       }
 
-      if(this.state.tradeAnalysis.isLocalMinima[i]) {
+      /*if(this.state.tradeAnalysis.isLocalMinima[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.TRIANGLE_DOWN,
           CandlestickMarkerPosition.BELOW,
@@ -1748,8 +1785,11 @@ class App extends React.Component<{}, AppState> {
           "red",
           "V"
         ));
-      }
+      }*/
     }
+
+    let lines = new Array<Array<number>>();
+    lines.push(this.state.tradeAnalysis.sma50);
 
     return (
       <div>
@@ -1763,6 +1803,7 @@ class App extends React.Component<{}, AppState> {
           width={800}
           height={300}
           markers={markers}
+          lines={lines}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
@@ -1782,14 +1823,22 @@ class App extends React.Component<{}, AppState> {
         />
 
         <LineChart
-          chartTitle="Lin. Reg. % Close Slope"
-          values={this.state.tradeAnalysis.linRegSlopePctClose}
+          chartTitle="SMA 50 1st d/dt"
+          values={this.state.tradeAnalysis.sma50Derivative1st}
           width={800}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
-          highlightedColumnIndex={highlightedColumnIndex}
+        />
+        <LineChart
+          chartTitle="SMA 50 2nd d/dt"
+          values={this.state.tradeAnalysis.sma50Derivative2nd}
+          width={800}
+          height={100}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
       </div>
     );
@@ -1805,24 +1854,6 @@ class App extends React.Component<{}, AppState> {
           scrollOffsetInColumns={scrollOffsetInColumns}
         />
 
-        <LineChart
-          chartTitle="SMA 1st d/dt"
-          values={this.state.tradeAnalysis.sma1stDerivative}
-          width={800}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-        <LineChart
-          chartTitle="SMA 2nd d/dt"
-          values={this.state.tradeAnalysis.sma2ndDerivative}
-          width={800}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
         <LineChart
           chartTitle="Stochastic Close"
           values={this.state.tradeAnalysis.stochasticClose}
