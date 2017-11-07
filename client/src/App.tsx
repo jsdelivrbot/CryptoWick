@@ -106,7 +106,7 @@ class App extends React.Component<{}, AppState> {
     const currencyAmount = parseFloat((usdAmount / lastPrice).toFixed(5));
     if(isNaN(currencyAmount)) { return Promise.reject("Invalid calculated currency amount."); }
 
-    const price = 1.03 * lastPrice;
+    const price = parseFloat((1.03 * lastPrice).toFixed(2));
     const securitySymbol = `${currency}USD`;
 
     return Gemini.buyCurrencyThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, securitySymbol, currencyAmount, price)
@@ -132,7 +132,7 @@ class App extends React.Component<{}, AppState> {
     const sellCurrencyAmount = parseFloat(currencyAmount.toFixed(5));
     if(isNaN(sellCurrencyAmount)) { return Promise.reject("Invalid currency amount."); }
 
-    const price = 0.97 * lastPrice;
+    const price = parseFloat((0.97 * lastPrice).toFixed(2));
     const securitySymbol = `${currency}USD`;
 
     return Gemini.sellCurrencyThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, securitySymbol, sellCurrencyAmount, price)
