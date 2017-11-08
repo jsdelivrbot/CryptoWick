@@ -23,35 +23,225 @@ import "./App.css";
 const ARROW_LEFT_KEY_CODE = 37;
 const ARROW_RIGHT_KEY_CODE = 39;
 
-interface AppState {
-  currentCurrency: string;
+const REFRESH_INTERVAL_IN_SECONDS = 30;
+
+let refreshCandlesticksIntervalHandle: number;
+
+class State {
+  currentCurrency: string; // TODO: REMOVE!!!
   tradeAnalysis: TradeAnalysis | null;
+  tradingAlgoState: TradingAlgorithmState;
 
   usdBalance: number;
   btcBalance: number;
   ethBalance: number;
 
+  settings: Settings;
+  useFakeHistoricalTrades: boolean;
+}
+
+let state = new State();
+state.currentCurrency = "BTC";
+state.tradingAlgoState = new TradingAlgorithmState();
+state.settings = new Settings('', '', '', '', '', '');
+state.useFakeHistoricalTrades = false;
+
+let rerender = () => {};
+let onEnterTrade = (candlestickIndex: number) => {};
+let onExitTrade = (candlestickIndex: number) => {};
+
+function initialize() {
+  const settings = loadSettings();
+
+  if(settings) {
+    state.settings = settings;
+
+    if(settings.geminiApiKey) {
+      reloadGeminiBalances()
+        .then(() => {
+          if(settings.twilioAccountSid) {
+            reloadCandlesticks();
+
+            refreshCandlesticksIntervalHandle = window.setInterval(
+              reloadCandlesticks,
+              1000 * REFRESH_INTERVAL_IN_SECONDS
+            );
+          }
+        });
+    }
+  }
+
+  rerender();
+}
+function uninitialize() {
+  clearInterval(refreshCandlesticksIntervalHandle);
+}
+function reloadGeminiBalances() {
+  return Gemini.loadAccountBalances(state.settings.geminiApiKey, state.settings.geminiApiSecret)
+    .then(json => {
+      state.usdBalance = json.USD;
+      state.btcBalance = json.BTC;
+      state.ethBalance = json.ETH;
+      
+      if(state.btcBalance > 0.001) {
+        state.tradingAlgoState.isInTrade = true;
+      }
+
+      rerender();
+    });
+}
+function reloadCandlesticks() {
+  return CryptoCompare.loadAggregate1MinCandlesticks(state.currentCurrency, "USD", "Gemini", 15)
+    .then(tradeAnalysis => {
+      const lastOpenTime = state.tradeAnalysis
+        ? state.tradeAnalysis.openTimes[state.tradeAnalysis.candlestickCount - 1]
+        : null;
+      const mostRecentOpenTime = tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1];
+
+      state.tradeAnalysis = tradeAnalysis;
+
+      const isNewAnalysis = !lastOpenTime || (mostRecentOpenTime > lastOpenTime);
+
+      if (isNewAnalysis) {
+        if(lastOpenTime === null) {
+          if(state.useFakeHistoricalTrades) {
+            const fakeBuyCurrency = () => Promise.resolve(true);
+            const fakeSellCurrency = () => Promise.resolve(true);
+
+            for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
+              const wasInTrade = state.tradingAlgoState.isInTrade;
+              updateTradingAlgorithm(state.tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency)
+                .then(() => {
+                  if(!wasInTrade && state.tradingAlgoState.isInTrade) { onEnterTrade(i); }
+                  if(wasInTrade && !state.tradingAlgoState.isInTrade) { onExitTrade(i); }
+                });
+            }
+          }
+        }
+
+        const tryBuyCurrency = () => {
+          return buyCurrency("BTC", Math.min(ALGORITHM_USD_TO_BUY, state.usdBalance))
+            .then(() => Promise.resolve(true))
+            .catch(() => {
+              console.log("Failed buying.");
+              return Promise.resolve(false);
+            });
+        };
+        const trySellCurrency = () => {
+          return sellCurrency("BTC", state.btcBalance * 0.99)
+            .then(() => Promise.resolve(true))
+            .catch(() => {
+              console.log("Failed selling.")
+              return Promise.resolve(false);
+            });
+        };
+
+        const wasInTrade = state.tradingAlgoState.isInTrade;
+        updateTradingAlgorithm(state.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency)
+          .then(() => {
+            if(!wasInTrade && state.tradingAlgoState.isInTrade) {
+              onEnterTrade(tradeAnalysis.candlestickCount - 1);
+    
+              Sms.sendTextWithTwilio(
+                state.settings.twilioAccountSid,
+                state.settings.twilioAuthToken,
+                state.settings.fromPhoneNumber,
+                state.settings.toPhoneNumber,
+                "Bought"
+              );
+            }
+            if(wasInTrade && !state.tradingAlgoState.isInTrade) {
+              onExitTrade(tradeAnalysis.candlestickCount - 1);
+    
+              Sms.sendTextWithTwilio(
+                state.settings.twilioAccountSid,
+                state.settings.twilioAuthToken,
+                state.settings.fromPhoneNumber,
+                state.settings.toPhoneNumber,
+                "Sold"
+              );
+            }
+
+            rerender();
+          });
+
+        /*if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
+          SMS.sendTextWithTwilio(
+            this.state.twilioAccountSid,
+            this.state.twilioAuthToken,
+            this.state.fromPhoneNumber,
+            this.state.toPhoneNumber,
+            "Abnormal volume."
+          );
+        }*/
+      }
+
+      rerender();
+    });
+}
+function buyCurrency(currency: string, usdAmount: number): Promise<any> {
+  if(!state.tradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
+
+  const lastPrice = state.tradeAnalysis.closes[state.tradeAnalysis.candlestickCount - 1];
+
+  const currencyAmount = parseFloat((usdAmount / lastPrice).toFixed(5));
+  if(isNaN(currencyAmount)) { return Promise.reject("Invalid calculated currency amount."); }
+
+  const price = parseFloat((1.03 * lastPrice).toFixed(2));
+  const securitySymbol = `${currency}USD`;
+
+  return Gemini.buyCurrencyThroughGemini(state.settings.geminiApiKey, state.settings.geminiApiSecret, securitySymbol, currencyAmount, price)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Error buying ${securitySymbol} through Gemini.`);
+      }
+
+      return response.json();
+    }).then(json => {
+      if(json.executed_amount === "0") {
+        throw new Error(`Error buying ${securitySymbol} through Gemini.`);
+      }
+
+      return reloadGeminiBalances();
+    });
+}
+function sellCurrency(currency: string, currencyAmount: number): Promise<any> {
+  if(!state.tradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
+
+  const lastPrice = state.tradeAnalysis.closes[state.tradeAnalysis.candlestickCount - 1];
+  
+  const sellCurrencyAmount = parseFloat(currencyAmount.toFixed(5));
+  if(isNaN(sellCurrencyAmount)) { return Promise.reject("Invalid currency amount."); }
+
+  const price = parseFloat((0.97 * lastPrice).toFixed(2));
+  const securitySymbol = `${currency}USD`;
+
+  return Gemini.sellCurrencyThroughGemini(state.settings.geminiApiKey, state.settings.geminiApiSecret, securitySymbol, sellCurrencyAmount, price)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Error selling ${securitySymbol} through Gemini.`);
+      }
+
+      return response.json();
+    }).then(json => {
+      if(json.executed_amount === "0") {
+        throw new Error(`Error selling ${securitySymbol} through Gemini.`);
+      }
+
+      return reloadGeminiBalances();
+    });
+}
+
+initialize();
+
+interface AppState {
   buyUsdAmount: string;
   sellCurrencyAmount: string;
-
-  geminiApiKey: string;
-  geminiApiSecret: string;
-
-  twilioAccountSid: string;
-  twilioAuthToken: string;
-  fromPhoneNumber: string;
-  toPhoneNumber: string;
-
   showHeikinAshiCandlesticks: boolean;
-  useFakeHistoricalTrades: boolean;
   scrollOffsetInColumns: number;
 }
 
 class App extends React.Component<{}, AppState> {
-  refreshCandlesticksIntervalHandle: number;
-  refreshIntervalSeconds = 30;
-
-  tradingAlgoState = new TradingAlgorithmState();
   entryPointOpenTimes = new Array<number>();
   exitPointOpenTimes = new Array<number>();
   
@@ -61,33 +251,14 @@ class App extends React.Component<{}, AppState> {
     super();
 
     this.state = {
-      currentCurrency: "BTC",
-      tradeAnalysis: null,
-
-      usdBalance: 0,
-      btcBalance: 0,
-      ethBalance: 0,
-
       buyUsdAmount: "",
       sellCurrencyAmount: "",
-
-      geminiApiKey: "",
-      geminiApiSecret: "",
-
-      twilioAccountSid: "",
-      twilioAuthToken: "",
-      fromPhoneNumber: "+1",
-      toPhoneNumber: "+1",
-
       showHeikinAshiCandlesticks: false,
-      useFakeHistoricalTrades: false,
-
       scrollOffsetInColumns: 0
     };
   }
 
   onCurrentCurrencyChange(event: any) {
-    this.setState({ currentCurrency: event.target.value }, this.reloadCandlesticks);
   }
 
   onBuyUsdAmountChange(event: any) {
@@ -98,77 +269,30 @@ class App extends React.Component<{}, AppState> {
     this.setState({ sellCurrencyAmount: event.target.value });
   }
 
-  buyCurrency(currency: string, usdAmount: number): Promise<any> {
-    if(!this.state.tradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
-
-    const lastPrice = this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1];
-
-    const currencyAmount = parseFloat((usdAmount / lastPrice).toFixed(5));
-    if(isNaN(currencyAmount)) { return Promise.reject("Invalid calculated currency amount."); }
-
-    const price = parseFloat((1.03 * lastPrice).toFixed(2));
-    const securitySymbol = `${currency}USD`;
-
-    return Gemini.buyCurrencyThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, securitySymbol, currencyAmount, price)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Error buying ${securitySymbol} through Gemini.`);
-        }
-
-        return response.json();
-      }).then(json => {
-        if(json.executed_amount === "0") {
-          throw new Error(`Error buying ${securitySymbol} through Gemini.`);
-        }
-
-        return this.reloadGeminiBalances();
-      });
-  }
-  sellCurrency(currency: string, currencyAmount: number): Promise<any> {
-    if(!this.state.tradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
-
-    const lastPrice = this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1];
-    
-    const sellCurrencyAmount = parseFloat(currencyAmount.toFixed(5));
-    if(isNaN(sellCurrencyAmount)) { return Promise.reject("Invalid currency amount."); }
-
-    const price = parseFloat((0.97 * lastPrice).toFixed(2));
-    const securitySymbol = `${currency}USD`;
-
-    return Gemini.sellCurrencyThroughGemini(this.state.geminiApiKey, this.state.geminiApiSecret, securitySymbol, sellCurrencyAmount, price)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`Error selling ${securitySymbol} through Gemini.`);
-        }
-
-        return response.json();
-      }).then(json => {
-        if(json.executed_amount === "0") {
-          throw new Error(`Error selling ${securitySymbol} through Gemini.`);
-        }
-
-        return this.reloadGeminiBalances();
-      });
-  }
-
   onGeminiApiKeyChange(event: any) {
-    this.setState({ geminiApiKey: event.target.value });
+    state.settings.geminiApiKey = event.target.value;
+    this.forceUpdate();
   }
   onGeminiApiSecretChange(event: any) {
-    this.setState({ geminiApiSecret: event.target.value });
+    state.settings.geminiApiSecret = event.target.value;
+    this.forceUpdate();
   }
 
   onTwilioAccountSidChange(event: any) {
-    this.setState({ twilioAccountSid: event.target.value });
+    state.settings.twilioAccountSid = event.target.value;
+    this.forceUpdate();
   }
   onTwilioAuthTokenChange(event: any) {
-    this.setState({ twilioAuthToken: event.target.value });
+    state.settings.twilioAuthToken = event.target.value;
+    this.forceUpdate();
   }
   onFromPhoneNumberChange(event: any) {
-    this.setState({ fromPhoneNumber: event.target.value });
+    state.settings.fromPhoneNumber = event.target.value;
+    this.forceUpdate();
   }
   onToPhoneNumberChange(event: any) {
-    this.setState({ toPhoneNumber: event.target.value });
+    state.settings.toPhoneNumber = event.target.value;
+    this.forceUpdate();
   }
 
   onKeyDown(event: KeyboardEvent) {
@@ -183,21 +307,13 @@ class App extends React.Component<{}, AppState> {
   }
 
   onSaveSettings(event: any) {
-    const settings = new Settings(
-      this.state.geminiApiKey,
-      this.state.geminiApiSecret,
-
-      this.state.twilioAccountSid,
-      this.state.twilioAuthToken,
-      this.state.fromPhoneNumber,
-      this.state.toPhoneNumber);
-    
-    saveSettings(settings);
+    saveSettings(state.settings);
+    this.forceUpdate();
   }
   onSendTestTextClick(event: any) {
     Sms.sendTextWithTwilio(
-      this.state.twilioAccountSid, this.state.twilioAuthToken,
-      this.state.fromPhoneNumber, this.state.toPhoneNumber,
+      state.settings.twilioAccountSid, state.settings.twilioAuthToken,
+      state.settings.fromPhoneNumber, state.settings.toPhoneNumber,
       "Text from CryptoWick!"
     );
   }
@@ -206,178 +322,52 @@ class App extends React.Component<{}, AppState> {
     this.setState({ showHeikinAshiCandlesticks: event.target.checked });
   }
 
-  reloadCandlesticks() {
-    CryptoCompare.loadAggregate1MinCandlesticks(this.state.currentCurrency, "USD", "Gemini", 15)
-    .then(tradeAnalysis => {
-      const lastOpenTime = this.state.tradeAnalysis
-        ? this.state.tradeAnalysis.openTimes[this.state.tradeAnalysis.candlestickCount - 1]
-        : null;
-      const mostRecentOpenTime = tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1];
-
-      this.setState({
-        tradeAnalysis: tradeAnalysis
-      });
-
-      const isNewAnalysis = !lastOpenTime || (mostRecentOpenTime > lastOpenTime);
-
-      if (isNewAnalysis) {
-        if(lastOpenTime === null) {
-          if(this.state.useFakeHistoricalTrades) {
-            const fakeBuyCurrency = () => Promise.resolve(true);
-            const fakeSellCurrency = () => Promise.resolve(true);
-  
-            for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
-              const wasInTrade = this.tradingAlgoState.isInTrade;
-              updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency)
-                .then(() => {
-                  if(!wasInTrade && this.tradingAlgoState.isInTrade) { this.entryPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
-                  if(wasInTrade && !this.tradingAlgoState.isInTrade) { this.exitPointOpenTimes.push(tradeAnalysis.openTimes[i]); }
-                });
-            }
-          }
-        }
-
-        const tryBuyCurrency = () => {
-          return this.buyCurrency("BTC", Math.min(ALGORITHM_USD_TO_BUY, this.state.usdBalance))
-            .then(() => Promise.resolve(true))
-            .catch(() => {
-              console.log("Failed buying.");
-              return Promise.resolve(false);
-            });
-        };
-        const trySellCurrency = () => {
-          return this.sellCurrency("BTC", this.state.btcBalance * 0.99)
-            .then(() => Promise.resolve(true))
-            .catch(() => {
-              console.log("Failed selling.")
-              return Promise.resolve(false);
-            });
-        };
-
-        const wasInTrade = this.tradingAlgoState.isInTrade;
-        updateTradingAlgorithm(this.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency)
-          .then(() => {
-            if(!wasInTrade && this.tradingAlgoState.isInTrade) {
-              this.entryPointOpenTimes.push(mostRecentOpenTime);
-    
-              Sms.sendTextWithTwilio(
-                this.state.twilioAccountSid,
-                this.state.twilioAuthToken,
-                this.state.fromPhoneNumber,
-                this.state.toPhoneNumber,
-                "Bought"
-              );
-            }
-            if(wasInTrade && !this.tradingAlgoState.isInTrade) {
-              this.exitPointOpenTimes.push(mostRecentOpenTime);
-    
-              Sms.sendTextWithTwilio(
-                this.state.twilioAccountSid,
-                this.state.twilioAuthToken,
-                this.state.fromPhoneNumber,
-                this.state.toPhoneNumber,
-                "Sold"
-              );
-            }
-    
-            this.forceUpdate();
-          });
-
-        /*if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
-          SMS.sendTextWithTwilio(
-            this.state.twilioAccountSid,
-            this.state.twilioAuthToken,
-            this.state.fromPhoneNumber,
-            this.state.toPhoneNumber,
-            "Abnormal volume."
-          );
-        }*/
-      }
-    });
-  }
-  reloadGeminiBalances() {
-    return Gemini.loadAccountBalances(this.state.geminiApiKey, this.state.geminiApiSecret)
-      .then(json => {
-        const newState = {
-          usdBalance: json.USD,
-          btcBalance: json.BTC,
-          ethBalance: json.ETH
-        };
-        
-        if(newState.btcBalance > 0.001) {
-          this.tradingAlgoState.isInTrade = true;
-        }
-
-        this.setState(newState);
-      });
-  }
-
   componentDidMount() {
-    const settings = loadSettings();
-    if (settings) {
-      const afterSettingsApplied = () => {
-        if(settings.geminiApiKey) {
-          this.reloadGeminiBalances()
-            .then(() => {
-              if(settings.twilioAccountSid) {
-                this.reloadCandlesticks();
-                this.refreshCandlesticksIntervalHandle = setInterval(
-                  this.reloadCandlesticks.bind(this),
-                  1000 * this.refreshIntervalSeconds
-                );
-              }
-            });
-        }
-      };
-
-      this.setState({
-        geminiApiKey: settings.geminiApiKey,
-        geminiApiSecret: settings.geminiApiSecret,
-
-        twilioAccountSid: settings.twilioAccountSid,
-        twilioAuthToken: settings.twilioAuthToken,
-        fromPhoneNumber: settings.fromPhoneNumber,
-        toPhoneNumber: settings.toPhoneNumber
-      }, afterSettingsApplied);
-    }
+    rerender = () => { this.forceUpdate(); };
+    onEnterTrade = (candlestickIndex: number) => {
+      this.entryPointOpenTimes.push(candlestickIndex);
+      rerender();
+    };
+    onExitTrade = (candlestickIndex: number) => {
+      this.exitPointOpenTimes.push(candlestickIndex);
+      rerender();
+    };
 
     this.keyDownEventHandler = this.onKeyDown.bind(this);
     window.addEventListener("keydown", this.keyDownEventHandler);
   }
   componentWillUnmount() {
     window.removeEventListener("keydown", this.keyDownEventHandler);
-
-    clearInterval(this.refreshCandlesticksIntervalHandle);
   }
 
   renderCharts() {
-    if(!this.state.tradeAnalysis) { return null; }
+    if(!state.tradeAnalysis) { return null; }
 
     const useHeikinAshiCandlesticks = this.state.showHeikinAshiCandlesticks;
 
-    const opens = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.opens : this.state.tradeAnalysis.heikinOpens;
-    const highs = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.highs : this.state.tradeAnalysis.heikinHighs;
-    const lows = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.lows : this.state.tradeAnalysis.heikinLows;
-    const closes = !useHeikinAshiCandlesticks ? this.state.tradeAnalysis.closes : this.state.tradeAnalysis.heikinCloses;
-    const volumes = this.state.tradeAnalysis.volumes;
+    const opens = !useHeikinAshiCandlesticks ? state.tradeAnalysis.opens : state.tradeAnalysis.heikinOpens;
+    const highs = !useHeikinAshiCandlesticks ? state.tradeAnalysis.highs : state.tradeAnalysis.heikinHighs;
+    const lows = !useHeikinAshiCandlesticks ? state.tradeAnalysis.lows : state.tradeAnalysis.heikinLows;
+    const closes = !useHeikinAshiCandlesticks ? state.tradeAnalysis.closes : state.tradeAnalysis.heikinCloses;
+    const volumes = state.tradeAnalysis.volumes;
 
     const heikinAshiCandlestickHeights = ArrayUtils.combineArrays(
-      this.state.tradeAnalysis.heikinOpens,
-      this.state.tradeAnalysis.heikinCloses,
+      state.tradeAnalysis.heikinOpens,
+      state.tradeAnalysis.heikinCloses,
       (a, b) => b - a
     );
 
-    let areEntryPoints = new Array<boolean>(this.state.tradeAnalysis.candlestickCount);
-    for(let i = 0; i < this.state.tradeAnalysis.candlestickCount; i++) {
-      areEntryPoints[i] = this.entryPointOpenTimes.indexOf(this.state.tradeAnalysis.openTimes[i]) >= 0;
+    let areEntryPoints = new Array<boolean>(state.tradeAnalysis.candlestickCount);
+    for(let i = 0; i < state.tradeAnalysis.candlestickCount; i++) {
+      areEntryPoints[i] = this.entryPointOpenTimes.indexOf(state.tradeAnalysis.openTimes[i]) >= 0;
     }
 
-    let areExitPoints = new Array<boolean>(this.state.tradeAnalysis.candlestickCount);
-    for(let i = 0; i < this.state.tradeAnalysis.candlestickCount; i++) {
-      areExitPoints[i] = this.exitPointOpenTimes.indexOf(this.state.tradeAnalysis.openTimes[i]) >= 0;
+    let areExitPoints = new Array<boolean>(state.tradeAnalysis.candlestickCount);
+    for(let i = 0; i < state.tradeAnalysis.candlestickCount; i++) {
+      areExitPoints[i] = this.exitPointOpenTimes.indexOf(state.tradeAnalysis.openTimes[i]) >= 0;
     }
 
-    const candlestickColors = this.state.tradeAnalysis
+    const candlestickColors = state.tradeAnalysis
       ? ArrayUtils.combineArrays(
           opens,
           closes,
@@ -391,7 +381,7 @@ class App extends React.Component<{}, AppState> {
     const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
     const highlightedColumnIndex = 1;
 
-    let markers = new Array<Array<CandlestickMarker>>(this.state.tradeAnalysis.candlestickCount);
+    let markers = new Array<Array<CandlestickMarker>>(state.tradeAnalysis.candlestickCount);
     for(let i = 0; i < markers.length; i++) {
       markers[i] = new Array<CandlestickMarker>();
 
@@ -412,7 +402,7 @@ class App extends React.Component<{}, AppState> {
         ));
       }
 
-      /*if(this.state.tradeAnalysis.isLocalMinima[i]) {
+      /*if(state.tradeAnalysis.isLocalMinima[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.TRIANGLE_DOWN,
           CandlestickMarkerPosition.BELOW,
@@ -420,7 +410,7 @@ class App extends React.Component<{}, AppState> {
         ));
       }
 
-      if(this.state.tradeAnalysis.isLocalMaxima[i]) {
+      if(state.tradeAnalysis.isLocalMaxima[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.TRIANGLE_UP,
           CandlestickMarkerPosition.ABOVE,
@@ -428,7 +418,7 @@ class App extends React.Component<{}, AppState> {
         ));
       }
 
-      if(this.state.tradeAnalysis.isVolumeAbnormal[i]) {
+      if(state.tradeAnalysis.isVolumeAbnormal[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.LETTER,
           CandlestickMarkerPosition.BELOW,
@@ -436,7 +426,7 @@ class App extends React.Component<{}, AppState> {
           "V"
         ));
       }
-      if(this.state.tradeAnalysis.didVolumeDrop[i]) {
+      if(state.tradeAnalysis.didVolumeDrop[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.LETTER,
           CandlestickMarkerPosition.ABOVE,
@@ -447,14 +437,14 @@ class App extends React.Component<{}, AppState> {
     }
 
     let lines = new Array<Array<number>>();
-    lines.push(this.state.tradeAnalysis.sma50);
+    lines.push(state.tradeAnalysis.sma50);
 
-    const sma50Derivative2ndSma4 = Maths.laggingSimpleMovingAverage(this.state.tradeAnalysis.sma50Derivative2nd, 4);
+    const sma50Derivative2ndSma4 = Maths.laggingSimpleMovingAverage(state.tradeAnalysis.sma50Derivative2nd, 4);
 
     return (
       <div>
         <CandlestickChart
-          tradeAnalysis={this.state.tradeAnalysis}
+          tradeAnalysis={state.tradeAnalysis}
           opens={opens}
           highs={highs}
           lows={lows}
@@ -472,7 +462,7 @@ class App extends React.Component<{}, AppState> {
 
         <HistogramChart
           chartTitle="Volume"
-          values={this.state.tradeAnalysis.volumes}
+          values={state.tradeAnalysis.volumes}
           colors={candlestickColors}
           width={800}
           height={100}
@@ -484,7 +474,7 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="SMA 50 1st d/dt"
-          values={this.state.tradeAnalysis.sma50Derivative1st}
+          values={state.tradeAnalysis.sma50Derivative1st}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -516,7 +506,7 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="Stochastic Close"
-          values={this.state.tradeAnalysis.stochasticClose}
+          values={state.tradeAnalysis.stochasticClose}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -526,7 +516,7 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="Stochastic Volume"
-          values={this.state.tradeAnalysis.stochasticVolume}
+          values={state.tradeAnalysis.stochasticVolume}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -536,7 +526,7 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="Bullishness"
-          values={this.state.tradeAnalysis.bullishness}
+          values={state.tradeAnalysis.bullishness}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -546,7 +536,7 @@ class App extends React.Component<{}, AppState> {
         
         <LineChart
           chartTitle="Lin. Reg. % Close Slope Concavity"
-          values={this.state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity}
+          values={state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -555,7 +545,7 @@ class App extends React.Component<{}, AppState> {
         />
         <LineChart
           chartTitle="Lin. Reg. % Close Slope * Volume"
-          values={this.state.tradeAnalysis.linRegSlopePctCloseMulVolumeMean}
+          values={state.tradeAnalysis.linRegSlopePctCloseMulVolumeMean}
           width={800}
           height={100}
           columnWidth={columnWidth}
@@ -566,8 +556,8 @@ class App extends React.Component<{}, AppState> {
   }
   render() {
     const onCurrentCurrencyChange = this.onCurrentCurrencyChange.bind(this);
-    const buyCurrency = this.buyCurrency.bind(this, this.state.currentCurrency, this.state.buyUsdAmount);
-    const sellCurrency = this.sellCurrency.bind(this, this.state.currentCurrency, this.state.sellCurrencyAmount);
+    const onBuyCurrencyClicked = buyCurrency.bind(this, state.currentCurrency, this.state.buyUsdAmount);
+    const onSellCurrencyClicked = sellCurrency.bind(this, state.currentCurrency, this.state.sellCurrencyAmount);
     const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
     const onSellCurrencyAmountChange = this.onSellCurrencyAmountChange.bind(this);
     const onGeminiApiKeyChange = this.onGeminiApiKeyChange.bind(this);
@@ -582,28 +572,28 @@ class App extends React.Component<{}, AppState> {
 
     return (
       <div className="App">
-        <p>USD: {this.state.usdBalance} BTC: {this.state.btcBalance} ETH: {this.state.ethBalance}</p>
-        <p>{this.tradingAlgoState.isInTrade ? "IN TRADE" : "NOT IN TRADE"}</p>
+        <p>USD: {state.usdBalance} BTC: {state.btcBalance} ETH: {state.ethBalance}</p>
+        <p>{state.tradingAlgoState.isInTrade ? "IN TRADE" : "NOT IN TRADE"}</p>
         {false
           ? (
-              <select value={this.state.currentCurrency} onChange={onCurrentCurrencyChange}>
+              <select value={state.currentCurrency} onChange={onCurrentCurrencyChange}>
                 <option value="BTC">BTC</option>
                 <option value="ETH">ETH</option>
               </select>
             )
           : null}
-        {this.state.tradeAnalysis ? <p>Last: {this.state.tradeAnalysis.closes[this.state.tradeAnalysis.candlestickCount - 1]}</p> : null}
+        {state.tradeAnalysis ? <p>Last: {state.tradeAnalysis.closes[state.tradeAnalysis.candlestickCount - 1]}</p> : null}
         <div>
           <div>
             Buy Amount (USD)
             <input type="text" value={this.state.buyUsdAmount} onChange={onBuyUsdAmountChange} />
-            <button onClick={buyCurrency}>Buy</button>
+            <button onClick={onBuyCurrencyClicked}>Buy</button>
           </div>
 
           <div>
-            Sell Amount ({this.state.currentCurrency})
+            Sell Amount ({state.currentCurrency})
             <input type="text" value={this.state.sellCurrencyAmount} onChange={onSellCurrencyAmountChange} />
-            <button onClick={sellCurrency}>Sell</button>
+            <button onClick={onSellCurrencyClicked}>Sell</button>
           </div>
         </div>
         <div><input type="checkbox" checked={this.state.showHeikinAshiCandlesticks} onChange={onShowHeikinAshiCandlesticksChange} /> Show Heikin-Ashi</div>
@@ -611,33 +601,33 @@ class App extends React.Component<{}, AppState> {
         <div>
           <div>
             Twilio Account SID
-            <input type="text" value={this.state.twilioAccountSid} onChange={onTwilioAccountSidChange} />
+            <input type="text" value={state.settings.twilioAccountSid} onChange={onTwilioAccountSidChange} />
           </div>
 
           <div>
             Twilio Auth Token
-            <input type="text" value={this.state.twilioAuthToken} onChange={onTwilioAuthTokenChange} />
+            <input type="text" value={state.settings.twilioAuthToken} onChange={onTwilioAuthTokenChange} />
           </div>
 
           <div>
             From
-            <input type="text" value={this.state.fromPhoneNumber} onChange={onFromPhoneNumberChange} />
+            <input type="text" value={state.settings.fromPhoneNumber} onChange={onFromPhoneNumberChange} />
           </div>
 
           <div>
             To
-            <input type="text" value={this.state.toPhoneNumber} onChange={onToPhoneNumberChange} />
+            <input type="text" value={state.settings.toPhoneNumber} onChange={onToPhoneNumberChange} />
           </div>
         </div>
         <div>
           <div>
             Gemini Public Key
-            <input type="text" value={this.state.geminiApiKey} onChange={onGeminiApiKeyChange} />
+            <input type="text" value={state.settings.geminiApiKey} onChange={onGeminiApiKeyChange} />
           </div>
 
           <div>
             Gemini Private Key
-            <input type="text" value={this.state.geminiApiSecret} onChange={onGeminiApiSecretChange} />
+            <input type="text" value={state.settings.geminiApiSecret} onChange={onGeminiApiSecretChange} />
           </div>
         </div>
         <div>
