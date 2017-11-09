@@ -193,7 +193,7 @@ function reloadCandlesticks() {
 
       rerender();
     });
-  }, 1000);
+  }, 5000);
   
   return btcLoadingPromise;
 }
@@ -257,6 +257,7 @@ interface AppState {
   sellCurrencyAmount: string;
   showHeikinAshiCandlesticks: boolean;
   scrollOffsetInColumns: number;
+  showSettings: boolean;
 }
 
 class App extends React.Component<{}, AppState> {
@@ -272,7 +273,8 @@ class App extends React.Component<{}, AppState> {
       buyUsdAmount: "",
       sellCurrencyAmount: "",
       showHeikinAshiCandlesticks: false,
-      scrollOffsetInColumns: 0
+      scrollOffsetInColumns: 0,
+      showSettings: false
     };
   }
 
@@ -338,6 +340,10 @@ class App extends React.Component<{}, AppState> {
 
   onShowHeikinAshiCandlesticksChange(event: any) {
     this.setState({ showHeikinAshiCandlesticks: event.target.checked });
+  }
+
+  onToggleSettingsClicked() {
+    this.setState({ showSettings: !this.state.showSettings });
   }
 
   componentDidMount() {
@@ -587,6 +593,7 @@ class App extends React.Component<{}, AppState> {
     const onSaveSettings = this.onSaveSettings.bind(this);
     const onSendTestTextClick = this.onSendTestTextClick.bind(this);
     const onShowHeikinAshiCandlesticksChange = this.onShowHeikinAshiCandlesticksChange.bind(this);
+    const onToggleSettingsClicked = this.onToggleSettingsClicked.bind(this);
 
     return (
       <div className="App">
@@ -618,42 +625,48 @@ class App extends React.Component<{}, AppState> {
         {this.renderCharts(state.btcTradeAnalysis)}
         {this.renderCharts(state.ethTradeAnalysis)}
         <div style={{ clear: "both" }} />
-        <div>
-          <div>
-            Twilio Account SID
-            <input type="text" value={state.settings.twilioAccountSid} onChange={onTwilioAccountSidChange} />
-          </div>
 
+        {this.state.showSettings ? (
           <div>
-            Twilio Auth Token
-            <input type="text" value={state.settings.twilioAuthToken} onChange={onTwilioAuthTokenChange} />
-          </div>
+            <div>
+              <div>
+                Twilio Account SID
+                <input type="text" value={state.settings.twilioAccountSid} onChange={onTwilioAccountSidChange} />
+              </div>
 
-          <div>
-            From
-            <input type="text" value={state.settings.fromPhoneNumber} onChange={onFromPhoneNumberChange} />
-          </div>
+              <div>
+                Twilio Auth Token
+                <input type="text" value={state.settings.twilioAuthToken} onChange={onTwilioAuthTokenChange} />
+              </div>
 
-          <div>
-            To
-            <input type="text" value={state.settings.toPhoneNumber} onChange={onToPhoneNumberChange} />
-          </div>
-        </div>
-        <div>
-          <div>
-            Gemini Public Key
-            <input type="text" value={state.settings.geminiApiKey} onChange={onGeminiApiKeyChange} />
-          </div>
+              <div>
+                From
+                <input type="text" value={state.settings.fromPhoneNumber} onChange={onFromPhoneNumberChange} />
+              </div>
 
-          <div>
-            Gemini Private Key
-            <input type="text" value={state.settings.geminiApiSecret} onChange={onGeminiApiSecretChange} />
+              <div>
+                To
+                <input type="text" value={state.settings.toPhoneNumber} onChange={onToPhoneNumberChange} />
+              </div>
+            </div>
+            <div><button onClick={onSendTestTextClick}>Send Test Text</button></div>
+
+            <div>
+              <div>
+                Gemini Public Key
+                <input type="text" value={state.settings.geminiApiKey} onChange={onGeminiApiKeyChange} />
+              </div>
+
+              <div>
+                Gemini Private Key
+                <input type="text" value={state.settings.geminiApiSecret} onChange={onGeminiApiSecretChange} />
+              </div>
+            </div>
+            <div><button onClick={onSaveSettings}>Save Settings</button></div>
+
+            <button onClick={onToggleSettingsClicked}>Hide Settings</button>
           </div>
-        </div>
-        <div>
-          <button onClick={onSaveSettings}>Save Settings</button>
-          <button onClick={onSendTestTextClick}>Send Test Text</button>
-        </div>
+        ) : <button onClick={onToggleSettingsClicked}>Show Settings</button>}
       </div>
     );
   }
