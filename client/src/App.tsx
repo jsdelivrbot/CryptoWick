@@ -25,11 +25,13 @@ const ARROW_RIGHT_KEY_CODE = 39;
 
 const REFRESH_INTERVAL_IN_SECONDS = 30;
 
+const CHART_WIDTH = 600;
+
 let refreshCandlesticksIntervalHandle: number;
 
 class State {
-  currentCurrency: string; // TODO: REMOVE!!!
-  tradeAnalysis: TradeAnalysis | null;
+  btcTradeAnalysis: TradeAnalysis | null;
+  ethTradeAnalysis: TradeAnalysis | null;
   tradingAlgoState: TradingAlgorithmState;
 
   usdBalance: number;
@@ -41,7 +43,6 @@ class State {
 }
 
 let state = new State();
-state.currentCurrency = "BTC";
 state.tradingAlgoState = new TradingAlgorithmState();
 state.settings = new Settings('', '', '', '', '', '');
 state.useFakeHistoricalTrades = false;
@@ -90,105 +91,122 @@ function reloadGeminiBalances() {
       rerender();
     });
 }
-function reloadCandlesticks() {
-  return CryptoCompare.loadAggregate1MinCandlesticks(state.currentCurrency, "USD", "Gemini", 15)
-    .then(tradeAnalysis => {
-      const lastOpenTime = state.tradeAnalysis
-        ? state.tradeAnalysis.openTimes[state.tradeAnalysis.candlestickCount - 1]
-        : null;
-      const mostRecentOpenTime = tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1];
+function onNewBtcTradeAnalysis() {
+  const tradeAnalysis = state.btcTradeAnalysis;
 
-      state.tradeAnalysis = tradeAnalysis;
+  if(!tradeAnalysis) { return; }
 
-      const isNewAnalysis = !lastOpenTime || (mostRecentOpenTime > lastOpenTime);
+  const lastOpenTime = tradeAnalysis
+  ? tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1]
+  : null;
+  const mostRecentOpenTime = tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1];
+  const isNewAnalysis = !lastOpenTime || (mostRecentOpenTime > lastOpenTime);
 
-      if (isNewAnalysis) {
-        if(lastOpenTime === null) {
-          if(state.useFakeHistoricalTrades) {
-            const fakeBuyCurrency = () => Promise.resolve(true);
-            const fakeSellCurrency = () => Promise.resolve(true);
+  if (isNewAnalysis) {
+    if(lastOpenTime === null) {
+      if(state.useFakeHistoricalTrades) {
+        const fakeBuyCurrency = () => Promise.resolve(true);
+        const fakeSellCurrency = () => Promise.resolve(true);
 
-            for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
-              const wasInTrade = state.tradingAlgoState.isInTrade;
-              updateTradingAlgorithm(state.tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency)
-                .then(() => {
-                  if(!wasInTrade && state.tradingAlgoState.isInTrade) { onEnterTrade(i); }
-                  if(wasInTrade && !state.tradingAlgoState.isInTrade) { onExitTrade(i); }
-                });
-            }
-          }
+        for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
+          const wasInTrade = state.tradingAlgoState.isInTrade;
+          updateTradingAlgorithm(state.tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency)
+            .then(() => {
+              if(!wasInTrade && state.tradingAlgoState.isInTrade) { onEnterTrade(i); }
+              if(wasInTrade && !state.tradingAlgoState.isInTrade) { onExitTrade(i); }
+            });
+        }
+      }
+    }
+
+    const tryBuyCurrency = () => {
+      return buyBtc(Math.min(ALGORITHM_USD_TO_BUY, state.usdBalance))
+        .then(() => Promise.resolve(true))
+        .catch(() => {
+          console.log("Failed buying.");
+          return Promise.resolve(false);
+        });
+    };
+    const trySellCurrency = () => {
+      return sellBtc(state.btcBalance * 0.99)
+        .then(() => Promise.resolve(true))
+        .catch(() => {
+          console.log("Failed selling.")
+          return Promise.resolve(false);
+        });
+    };
+
+    const wasInTrade = state.tradingAlgoState.isInTrade;
+    updateTradingAlgorithm(state.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency)
+      .then(() => {
+        if(!wasInTrade && state.tradingAlgoState.isInTrade) {
+          onEnterTrade(tradeAnalysis.candlestickCount - 1);
+
+          Sms.sendTextWithTwilio(
+            state.settings.twilioAccountSid,
+            state.settings.twilioAuthToken,
+            state.settings.fromPhoneNumber,
+            state.settings.toPhoneNumber,
+            "Bought"
+          );
+        }
+        if(wasInTrade && !state.tradingAlgoState.isInTrade) {
+          onExitTrade(tradeAnalysis.candlestickCount - 1);
+
+          Sms.sendTextWithTwilio(
+            state.settings.twilioAccountSid,
+            state.settings.twilioAuthToken,
+            state.settings.fromPhoneNumber,
+            state.settings.toPhoneNumber,
+            "Sold"
+          );
         }
 
-        const tryBuyCurrency = () => {
-          return buyCurrency("BTC", Math.min(ALGORITHM_USD_TO_BUY, state.usdBalance))
-            .then(() => Promise.resolve(true))
-            .catch(() => {
-              console.log("Failed buying.");
-              return Promise.resolve(false);
-            });
-        };
-        const trySellCurrency = () => {
-          return sellCurrency("BTC", state.btcBalance * 0.99)
-            .then(() => Promise.resolve(true))
-            .catch(() => {
-              console.log("Failed selling.")
-              return Promise.resolve(false);
-            });
-        };
+        rerender();
+      });
 
-        const wasInTrade = state.tradingAlgoState.isInTrade;
-        updateTradingAlgorithm(state.tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency)
-          .then(() => {
-            if(!wasInTrade && state.tradingAlgoState.isInTrade) {
-              onEnterTrade(tradeAnalysis.candlestickCount - 1);
-    
-              Sms.sendTextWithTwilio(
-                state.settings.twilioAccountSid,
-                state.settings.twilioAuthToken,
-                state.settings.fromPhoneNumber,
-                state.settings.toPhoneNumber,
-                "Bought"
-              );
-            }
-            if(wasInTrade && !state.tradingAlgoState.isInTrade) {
-              onExitTrade(tradeAnalysis.candlestickCount - 1);
-    
-              Sms.sendTextWithTwilio(
-                state.settings.twilioAccountSid,
-                state.settings.twilioAuthToken,
-                state.settings.fromPhoneNumber,
-                state.settings.toPhoneNumber,
-                "Sold"
-              );
-            }
+    /*if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
+      SMS.sendTextWithTwilio(
+        this.state.twilioAccountSid,
+        this.state.twilioAuthToken,
+        this.state.fromPhoneNumber,
+        this.state.toPhoneNumber,
+        "Abnormal volume."
+      );
+    }*/
+  }
+}
+function reloadCandlesticks() {
+  const btcLoadingPromise = CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", 15)
+    .then(tradeAnalysis => {
+      state.btcTradeAnalysis = tradeAnalysis;
 
-            rerender();
-          });
-
-        /*if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
-          SMS.sendTextWithTwilio(
-            this.state.twilioAccountSid,
-            this.state.twilioAuthToken,
-            this.state.fromPhoneNumber,
-            this.state.toPhoneNumber,
-            "Abnormal volume."
-          );
-        }*/
-      }
+      onNewBtcTradeAnalysis();
 
       rerender();
     });
-}
-function buyCurrency(currency: string, usdAmount: number): Promise<any> {
-  if(!state.tradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
+  
+  window.setTimeout(() => {
+    const ethLoadingPromise =CryptoCompare.loadAggregate1MinCandlesticks("ETH", "USD", "Gemini", 15)
+    .then(tradeAnalysis => {
+      state.ethTradeAnalysis = tradeAnalysis;
 
-  const lastPrice = state.tradeAnalysis.closes[state.tradeAnalysis.candlestickCount - 1];
+      rerender();
+    });
+  }, 1000);
+  
+  return btcLoadingPromise;
+}
+function buyBtc(usdAmount: number): Promise<any> {
+  if(!state.btcTradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
+
+  const lastPrice = state.btcTradeAnalysis.closes[state.btcTradeAnalysis.candlestickCount - 1];
 
   const currencyAmount = parseFloat((usdAmount / lastPrice).toFixed(5));
   if(isNaN(currencyAmount)) { return Promise.reject("Invalid calculated currency amount."); }
 
   const price = parseFloat((1.03 * lastPrice).toFixed(2));
-  const securitySymbol = `${currency}USD`;
+  const securitySymbol = `BTCUSD`;
 
   return Gemini.buyCurrencyThroughGemini(state.settings.geminiApiKey, state.settings.geminiApiSecret, securitySymbol, currencyAmount, price)
     .then(response => {
@@ -205,16 +223,16 @@ function buyCurrency(currency: string, usdAmount: number): Promise<any> {
       return reloadGeminiBalances();
     });
 }
-function sellCurrency(currency: string, currencyAmount: number): Promise<any> {
-  if(!state.tradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
+function sellBtc(currencyAmount: number): Promise<any> {
+  if(!state.btcTradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
 
-  const lastPrice = state.tradeAnalysis.closes[state.tradeAnalysis.candlestickCount - 1];
+  const lastPrice = state.btcTradeAnalysis.closes[state.btcTradeAnalysis.candlestickCount - 1];
   
   const sellCurrencyAmount = parseFloat(currencyAmount.toFixed(5));
   if(isNaN(sellCurrencyAmount)) { return Promise.reject("Invalid currency amount."); }
 
   const price = parseFloat((0.97 * lastPrice).toFixed(2));
-  const securitySymbol = `${currency}USD`;
+  const securitySymbol = `BTCUSD`;
 
   return Gemini.sellCurrencyThroughGemini(state.settings.geminiApiKey, state.settings.geminiApiSecret, securitySymbol, sellCurrencyAmount, price)
     .then(response => {
@@ -326,11 +344,11 @@ class App extends React.Component<{}, AppState> {
     rerender = () => { this.forceUpdate(); };
     onEnterTrade = (candlestickIndex: number) => {
       this.entryPointOpenTimes.push(candlestickIndex);
-      rerender();
+      this.forceUpdate();
     };
     onExitTrade = (candlestickIndex: number) => {
       this.exitPointOpenTimes.push(candlestickIndex);
-      rerender();
+      this.forceUpdate();
     };
 
     this.keyDownEventHandler = this.onKeyDown.bind(this);
@@ -340,34 +358,34 @@ class App extends React.Component<{}, AppState> {
     window.removeEventListener("keydown", this.keyDownEventHandler);
   }
 
-  renderCharts() {
-    if(!state.tradeAnalysis) { return null; }
+  renderCharts(tradeAnalysis: TradeAnalysis | null): JSX.Element | null {
+    if(!tradeAnalysis) { return null; }
 
     const useHeikinAshiCandlesticks = this.state.showHeikinAshiCandlesticks;
 
-    const opens = !useHeikinAshiCandlesticks ? state.tradeAnalysis.opens : state.tradeAnalysis.heikinOpens;
-    const highs = !useHeikinAshiCandlesticks ? state.tradeAnalysis.highs : state.tradeAnalysis.heikinHighs;
-    const lows = !useHeikinAshiCandlesticks ? state.tradeAnalysis.lows : state.tradeAnalysis.heikinLows;
-    const closes = !useHeikinAshiCandlesticks ? state.tradeAnalysis.closes : state.tradeAnalysis.heikinCloses;
-    const volumes = state.tradeAnalysis.volumes;
+    const opens = !useHeikinAshiCandlesticks ? tradeAnalysis.opens : tradeAnalysis.heikinOpens;
+    const highs = !useHeikinAshiCandlesticks ? tradeAnalysis.highs : tradeAnalysis.heikinHighs;
+    const lows = !useHeikinAshiCandlesticks ? tradeAnalysis.lows : tradeAnalysis.heikinLows;
+    const closes = !useHeikinAshiCandlesticks ? tradeAnalysis.closes : tradeAnalysis.heikinCloses;
+    const volumes = tradeAnalysis.volumes;
 
     const heikinAshiCandlestickHeights = ArrayUtils.combineArrays(
-      state.tradeAnalysis.heikinOpens,
-      state.tradeAnalysis.heikinCloses,
+      tradeAnalysis.heikinOpens,
+      tradeAnalysis.heikinCloses,
       (a, b) => b - a
     );
 
-    let areEntryPoints = new Array<boolean>(state.tradeAnalysis.candlestickCount);
-    for(let i = 0; i < state.tradeAnalysis.candlestickCount; i++) {
-      areEntryPoints[i] = this.entryPointOpenTimes.indexOf(state.tradeAnalysis.openTimes[i]) >= 0;
+    let areEntryPoints = new Array<boolean>(tradeAnalysis.candlestickCount);
+    for(let i = 0; i < tradeAnalysis.candlestickCount; i++) {
+      areEntryPoints[i] = this.entryPointOpenTimes.indexOf(tradeAnalysis.openTimes[i]) >= 0;
     }
 
-    let areExitPoints = new Array<boolean>(state.tradeAnalysis.candlestickCount);
-    for(let i = 0; i < state.tradeAnalysis.candlestickCount; i++) {
-      areExitPoints[i] = this.exitPointOpenTimes.indexOf(state.tradeAnalysis.openTimes[i]) >= 0;
+    let areExitPoints = new Array<boolean>(tradeAnalysis.candlestickCount);
+    for(let i = 0; i < tradeAnalysis.candlestickCount; i++) {
+      areExitPoints[i] = this.exitPointOpenTimes.indexOf(tradeAnalysis.openTimes[i]) >= 0;
     }
 
-    const candlestickColors = state.tradeAnalysis
+    const candlestickColors = tradeAnalysis
       ? ArrayUtils.combineArrays(
           opens,
           closes,
@@ -381,7 +399,7 @@ class App extends React.Component<{}, AppState> {
     const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
     const highlightedColumnIndex = 1;
 
-    let markers = new Array<Array<CandlestickMarker>>(state.tradeAnalysis.candlestickCount);
+    let markers = new Array<Array<CandlestickMarker>>(tradeAnalysis.candlestickCount);
     for(let i = 0; i < markers.length; i++) {
       markers[i] = new Array<CandlestickMarker>();
 
@@ -402,7 +420,7 @@ class App extends React.Component<{}, AppState> {
         ));
       }
 
-      /*if(state.tradeAnalysis.isLocalMinima[i]) {
+      /*if(tradeAnalysis.isLocalMinima[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.TRIANGLE_DOWN,
           CandlestickMarkerPosition.BELOW,
@@ -410,7 +428,7 @@ class App extends React.Component<{}, AppState> {
         ));
       }
 
-      if(state.tradeAnalysis.isLocalMaxima[i]) {
+      if(tradeAnalysis.isLocalMaxima[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.TRIANGLE_UP,
           CandlestickMarkerPosition.ABOVE,
@@ -418,7 +436,7 @@ class App extends React.Component<{}, AppState> {
         ));
       }
 
-      if(state.tradeAnalysis.isVolumeAbnormal[i]) {
+      if(tradeAnalysis.isVolumeAbnormal[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.LETTER,
           CandlestickMarkerPosition.BELOW,
@@ -426,7 +444,7 @@ class App extends React.Component<{}, AppState> {
           "V"
         ));
       }
-      if(state.tradeAnalysis.didVolumeDrop[i]) {
+      if(tradeAnalysis.didVolumeDrop[i]) {
         markers[i].push(new CandlestickMarker(
           CandlestickMarkerType.LETTER,
           CandlestickMarkerPosition.ABOVE,
@@ -437,20 +455,20 @@ class App extends React.Component<{}, AppState> {
     }
 
     let lines = new Array<Array<number>>();
-    lines.push(state.tradeAnalysis.sma50);
+    lines.push(tradeAnalysis.sma50);
 
-    const sma50Derivative2ndSma4 = Maths.laggingSimpleMovingAverage(state.tradeAnalysis.sma50Derivative2nd, 4);
+    const sma50Derivative2ndSma4 = Maths.laggingSimpleMovingAverage(tradeAnalysis.sma50Derivative2nd, 4);
 
     return (
-      <div>
+      <div style={{ width: CHART_WIDTH + "px", float: "left", margin: "10px" }}>
         <CandlestickChart
-          tradeAnalysis={state.tradeAnalysis}
+          tradeAnalysis={tradeAnalysis}
           opens={opens}
           highs={highs}
           lows={lows}
           closes={closes}
           volumes={volumes}
-          width={800}
+          width={CHART_WIDTH}
           height={300}
           markers={markers}
           lines={lines}
@@ -462,9 +480,9 @@ class App extends React.Component<{}, AppState> {
 
         <HistogramChart
           chartTitle="Volume"
-          values={state.tradeAnalysis.volumes}
+          values={tradeAnalysis.volumes}
           colors={candlestickColors}
-          width={800}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -474,8 +492,8 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="SMA 50 1st d/dt"
-          values={state.tradeAnalysis.sma50Derivative1st}
-          width={800}
+          values={tradeAnalysis.sma50Derivative1st}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -484,7 +502,7 @@ class App extends React.Component<{}, AppState> {
         <LineChart
           chartTitle="SMA 50 2nd d/dt SMA 4"
           values={sma50Derivative2ndSma4}
-          width={800}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -497,7 +515,7 @@ class App extends React.Component<{}, AppState> {
     <LineChart
           chartTitle="Heikin-Ashi Candlestick Body Heights"
           values={heikinAshiCandlestickHeights}
-          width={800}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -506,8 +524,8 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="Stochastic Close"
-          values={state.tradeAnalysis.stochasticClose}
-          width={800}
+          values={tradeAnalysis.stochasticClose}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -516,8 +534,8 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="Stochastic Volume"
-          values={state.tradeAnalysis.stochasticVolume}
-          width={800}
+          values={tradeAnalysis.stochasticVolume}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -526,8 +544,8 @@ class App extends React.Component<{}, AppState> {
 
         <LineChart
           chartTitle="Bullishness"
-          values={state.tradeAnalysis.bullishness}
-          width={800}
+          values={tradeAnalysis.bullishness}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -536,8 +554,8 @@ class App extends React.Component<{}, AppState> {
         
         <LineChart
           chartTitle="Lin. Reg. % Close Slope Concavity"
-          values={state.tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity}
-          width={800}
+          values={tradeAnalysis.lineOfBestFitPercentCloseSlopeConcavity}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -545,8 +563,8 @@ class App extends React.Component<{}, AppState> {
         />
         <LineChart
           chartTitle="Lin. Reg. % Close Slope * Volume"
-          values={state.tradeAnalysis.linRegSlopePctCloseMulVolumeMean}
-          width={800}
+          values={tradeAnalysis.linRegSlopePctCloseMulVolumeMean}
+          width={CHART_WIDTH}
           height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
@@ -556,8 +574,8 @@ class App extends React.Component<{}, AppState> {
   }
   render() {
     const onCurrentCurrencyChange = this.onCurrentCurrencyChange.bind(this);
-    const onBuyCurrencyClicked = buyCurrency.bind(this, state.currentCurrency, this.state.buyUsdAmount);
-    const onSellCurrencyClicked = sellCurrency.bind(this, state.currentCurrency, this.state.sellCurrencyAmount);
+    const onBuyCurrencyClicked = buyBtc.bind(this, this.state.buyUsdAmount);
+    const onSellCurrencyClicked = sellBtc.bind(this, this.state.sellCurrencyAmount);
     const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
     const onSellCurrencyAmountChange = this.onSellCurrencyAmountChange.bind(this);
     const onGeminiApiKeyChange = this.onGeminiApiKeyChange.bind(this);
@@ -576,13 +594,13 @@ class App extends React.Component<{}, AppState> {
         <p>{state.tradingAlgoState.isInTrade ? "IN TRADE" : "NOT IN TRADE"}</p>
         {false
           ? (
-              <select value={state.currentCurrency} onChange={onCurrentCurrencyChange}>
+              <select value={"BTC"} onChange={onCurrentCurrencyChange}>
                 <option value="BTC">BTC</option>
                 <option value="ETH">ETH</option>
               </select>
             )
           : null}
-        {state.tradeAnalysis ? <p>Last: {state.tradeAnalysis.closes[state.tradeAnalysis.candlestickCount - 1]}</p> : null}
+        {state.btcTradeAnalysis ? <p>Last: {state.btcTradeAnalysis.closes[state.btcTradeAnalysis.candlestickCount - 1]}</p> : null}
         <div>
           <div>
             Buy Amount (USD)
@@ -591,13 +609,15 @@ class App extends React.Component<{}, AppState> {
           </div>
 
           <div>
-            Sell Amount ({state.currentCurrency})
+            Sell Amount (BTC)
             <input type="text" value={this.state.sellCurrencyAmount} onChange={onSellCurrencyAmountChange} />
             <button onClick={onSellCurrencyClicked}>Sell</button>
           </div>
         </div>
         <div><input type="checkbox" checked={this.state.showHeikinAshiCandlesticks} onChange={onShowHeikinAshiCandlesticksChange} /> Show Heikin-Ashi</div>
-        {this.renderCharts()}
+        {this.renderCharts(state.btcTradeAnalysis)}
+        {this.renderCharts(state.ethTradeAnalysis)}
+        <div style={{ clear: "both" }} />
         <div>
           <div>
             Twilio Account SID
