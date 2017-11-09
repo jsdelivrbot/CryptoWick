@@ -41,10 +41,20 @@ class State {
   settings: Settings;
   useFakeHistoricalTrades: boolean;
 }
+function getBalance(state: State, securitySymbol: string) {
+  switch(securitySymbol) {
+    case "BTCUSD":
+      return state.btcBalance;
+    case "ETHUSD":
+      return state.ethBalance;
+    default:
+      throw new Error(`Unknown security symbol: ${securitySymbol}`)
+  }
+}
 
 let state = new State();
 state.tradingAlgoState = new TradingAlgorithmState();
-state.settings = new Settings('', '', '', '', '', '');
+state.settings = new Settings("", "", "", "", "", "");
 state.useFakeHistoricalTrades = false;
 
 let rerender = () => {};
@@ -91,9 +101,7 @@ function reloadGeminiBalances() {
       rerender();
     });
 }
-function onNewBtcTradeAnalysis() {
-  const tradeAnalysis = state.btcTradeAnalysis;
-
+function updateTradingAlgoWithNewTradeAnalysis(tradeAnalysis: TradeAnalysis) {
   if(!tradeAnalysis) { return; }
 
   const lastOpenTime = tradeAnalysis
@@ -120,7 +128,7 @@ function onNewBtcTradeAnalysis() {
     }
 
     const tryBuyCurrency = () => {
-      return buyBtc(Math.min(ALGORITHM_USD_TO_BUY, state.usdBalance))
+      return buyCurrency(tradeAnalysis.securitySymbol, Math.min(ALGORITHM_USD_TO_BUY, state.usdBalance))
         .then(() => Promise.resolve(true))
         .catch(() => {
           console.log("Failed buying.");
@@ -128,7 +136,7 @@ function onNewBtcTradeAnalysis() {
         });
     };
     const trySellCurrency = () => {
-      return sellBtc(state.btcBalance * 0.99)
+      return sellCurrency(tradeAnalysis.securitySymbol, getBalance(state, tradeAnalysis.securitySymbol) * 0.99)
         .then(() => Promise.resolve(true))
         .catch(() => {
           console.log("Failed selling.")
@@ -180,9 +188,7 @@ function reloadCandlesticks() {
   const btcLoadingPromise = CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", 15)
     .then(tradeAnalysis => {
       state.btcTradeAnalysis = tradeAnalysis;
-
-      onNewBtcTradeAnalysis();
-
+      updateTradingAlgoWithNewTradeAnalysis(state.btcTradeAnalysis);
       rerender();
     });
   
@@ -190,23 +196,22 @@ function reloadCandlesticks() {
     const ethLoadingPromise =CryptoCompare.loadAggregate1MinCandlesticks("ETH", "USD", "Gemini", 15)
     .then(tradeAnalysis => {
       state.ethTradeAnalysis = tradeAnalysis;
-
+      //updateTradingAlgoWithNewTradeAnalysis(state.ethTradeAnalysis);
       rerender();
     });
   }, 5000);
   
   return btcLoadingPromise;
 }
-function buyBtc(usdAmount: number): Promise<any> {
+function buyCurrency(securitySymbol: string, usdAmount: number): Promise<any> {
   if(!state.btcTradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
-
+  
   const lastPrice = state.btcTradeAnalysis.closes[state.btcTradeAnalysis.candlestickCount - 1];
 
   const currencyAmount = parseFloat((usdAmount / lastPrice).toFixed(5));
   if(isNaN(currencyAmount)) { return Promise.reject("Invalid calculated currency amount."); }
 
   const price = parseFloat((1.03 * lastPrice).toFixed(2));
-  const securitySymbol = `BTCUSD`;
 
   return Gemini.buyCurrencyThroughGemini(state.settings.geminiApiKey, state.settings.geminiApiSecret, securitySymbol, currencyAmount, price)
     .then(response => {
@@ -223,7 +228,7 @@ function buyBtc(usdAmount: number): Promise<any> {
       return reloadGeminiBalances();
     });
 }
-function sellBtc(currencyAmount: number): Promise<any> {
+function sellCurrency(securitySymbol: string, currencyAmount: number): Promise<any> {
   if(!state.btcTradeAnalysis) { return Promise.reject("Null tradeAnalysis."); }
 
   const lastPrice = state.btcTradeAnalysis.closes[state.btcTradeAnalysis.candlestickCount - 1];
@@ -232,7 +237,6 @@ function sellBtc(currencyAmount: number): Promise<any> {
   if(isNaN(sellCurrencyAmount)) { return Promise.reject("Invalid currency amount."); }
 
   const price = parseFloat((0.97 * lastPrice).toFixed(2));
-  const securitySymbol = `BTCUSD`;
 
   return Gemini.sellCurrencyThroughGemini(state.settings.geminiApiKey, state.settings.geminiApiSecret, securitySymbol, sellCurrencyAmount, price)
     .then(response => {
@@ -580,8 +584,8 @@ class App extends React.Component<{}, AppState> {
   }
   render() {
     const onCurrentCurrencyChange = this.onCurrentCurrencyChange.bind(this);
-    const onBuyCurrencyClicked = buyBtc.bind(this, this.state.buyUsdAmount);
-    const onSellCurrencyClicked = sellBtc.bind(this, this.state.sellCurrencyAmount);
+    const onBuyCurrencyClicked = buyCurrency.bind(this, "BTCUSD", this.state.buyUsdAmount);
+    const onSellCurrencyClicked = sellCurrency.bind(this, "BTCUSD", this.state.sellCurrencyAmount);
     const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
     const onSellCurrencyAmountChange = this.onSellCurrencyAmountChange.bind(this);
     const onGeminiApiKeyChange = this.onGeminiApiKeyChange.bind(this);

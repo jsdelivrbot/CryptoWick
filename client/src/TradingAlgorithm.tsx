@@ -5,6 +5,7 @@ export const ALGORITHM_USD_TO_BUY = 50;
 
 export class TradingAlgorithmState {
   isInTrade: boolean;
+  securitySymbol: string | null;
   stopLossPrice: number;
   minTakeProfitPrice: number;
   trailingStopLossPrice: number;
@@ -134,6 +135,7 @@ export function updateTradingAlgorithm(
       .then(succeeded => {
         if(succeeded) {
           state.isInTrade = true;
+          state.securitySymbol = tradeAnalysis.securitySymbol;
         }
       })
       .catch(error => {
@@ -148,6 +150,7 @@ export function updateTradingAlgorithm(
         .then(succeeded => {
           if(succeeded) {
             state.isInTrade = false;
+            state.securitySymbol = null;
           }
         })
         .catch(error => {
