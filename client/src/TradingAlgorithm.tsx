@@ -1,7 +1,7 @@
 import * as Utils from "./Utils";
 import { TradeAnalysis } from "./TradeAnalysis";
 
-export const ALGORITHM_USD_TO_BUY = 50;
+export const ALGORITHM_USD_TO_BUY = 2000;
 
 export class TradingAlgorithmState {
   isInTrade: boolean;

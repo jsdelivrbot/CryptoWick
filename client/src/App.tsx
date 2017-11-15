@@ -27,6 +27,84 @@ const REFRESH_INTERVAL_IN_SECONDS = 30;
 
 const CHART_WIDTH = 600;
 
+const CANDLESTICK_INTERVAL_IN_MINUTES = 15;
+
+// AST Stuff
+namespace Ast {
+  type AstNode = Identifier | BinaryOperator;
+
+  export class Identifier {
+    public readonly typeName: "Identifier" = "Identifier";
+
+    constructor(public text: string) {}
+  }
+
+  export enum BinaryOperatorType {
+    ADDITION,
+    SUBTRACTION,
+    MULTIPLICATION,
+    DIVISION
+  }
+  export class BinaryOperator {
+    public readonly typeName: "BinaryOperator" = "BinaryOperator";
+
+    constructor(public type: BinaryOperatorType, public operand1: AstNode, public operand2: AstNode) {}
+  }
+
+  export function evaluate(node: AstNode, tradeAnalysis: TradeAnalysis): number[] {
+    switch(node.typeName) {
+      case "Identifier":
+        return evaluateIdentifier(node, tradeAnalysis);
+      case "BinaryOperator":
+        return evaluateBinaryOperator(node, tradeAnalysis);
+    }
+  }
+  export function evaluateIdentifier(identifier: Identifier, tradeAnalysis: TradeAnalysis): number[] {
+    switch(identifier.text) {
+      case "open":
+        return tradeAnalysis.opens;
+      case "high":
+        return tradeAnalysis.highs;
+      case "low":
+        return tradeAnalysis.lows;
+      case "close":
+        return tradeAnalysis.closes;
+      default:
+        throw new Error(`Unknown identifier: ${identifier.text}`)
+    }
+  }
+  export function evaluateBinaryOperator(binaryOperator: BinaryOperator, tradeAnalysis: TradeAnalysis): number[] {
+    switch(binaryOperator.type) {
+      case BinaryOperatorType.ADDITION:
+        return ArrayUtils.combineArrays(
+          evaluate(binaryOperator.operand1, tradeAnalysis),
+          evaluate(binaryOperator.operand2, tradeAnalysis),
+          (a, b) => a + b
+        );
+      case BinaryOperatorType.SUBTRACTION:
+        return ArrayUtils.combineArrays(
+          evaluate(binaryOperator.operand1, tradeAnalysis),
+          evaluate(binaryOperator.operand2, tradeAnalysis),
+          (a, b) => a - b
+        );
+      case BinaryOperatorType.MULTIPLICATION:
+          return ArrayUtils.combineArrays(
+          evaluate(binaryOperator.operand1, tradeAnalysis),
+          evaluate(binaryOperator.operand2, tradeAnalysis),
+          (a, b) => a * b
+        );
+      case BinaryOperatorType.DIVISION:
+          return ArrayUtils.combineArrays(
+          evaluate(binaryOperator.operand1, tradeAnalysis),
+          evaluate(binaryOperator.operand2, tradeAnalysis),
+          (a, b) => a / b
+        );
+      default:
+        throw new Error(`Unknown binary operator: ${binaryOperator.type}`);
+    }
+  }
+}
+
 let refreshCandlesticksIntervalHandle: number;
 
 class State {
@@ -68,7 +146,7 @@ let state = new State();
 state.btcTradingAlgoState = new TradingAlgorithmState();
 state.ethTradingAlgoState = new TradingAlgorithmState();
 state.settings = new Settings("", "", "", "", "", "");
-state.useFakeHistoricalTrades = false;
+state.useFakeHistoricalTrades = true;
 
 let rerender = () => {};
 let onEnterTrade = (candlestickIndex: number) => {};
@@ -199,7 +277,7 @@ function updateTradingAlgoWithNewTradeAnalysis(tradeAnalysis: TradeAnalysis, tra
   }
 }
 function reloadCandlesticks() {
-  const btcLoadingPromise = CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", 15)
+  const btcLoadingPromise = CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_MINUTES)
     .then(tradeAnalysis => {
       state.btcTradeAnalysis = tradeAnalysis;
       updateTradingAlgoWithNewTradeAnalysis(state.btcTradeAnalysis, state.btcTradingAlgoState);
@@ -207,7 +285,7 @@ function reloadCandlesticks() {
     });
   
   window.setTimeout(() => {
-    const ethLoadingPromise =CryptoCompare.loadAggregate1MinCandlesticks("ETH", "USD", "Gemini", 15)
+    const ethLoadingPromise =CryptoCompare.loadAggregate1MinCandlesticks("ETH", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_MINUTES)
     .then(tradeAnalysis => {
       state.ethTradeAnalysis = tradeAnalysis;
       updateTradingAlgoWithNewTradeAnalysis(state.ethTradeAnalysis, state.ethTradingAlgoState);
@@ -485,11 +563,20 @@ class App extends React.Component<{}, AppState> {
     lines.push(tradeAnalysis.sma50);
 
     const sma50Derivative2ndSma4 = Maths.laggingSimpleMovingAverage(tradeAnalysis.sma50Derivative2nd, 4);
+    const closeSma16 = Maths.laggingSimpleMovingAverage(tradeAnalysis.closes, 16);
+    const closeMinusCloseSma8 = ArrayUtils.combineArrays(tradeAnalysis.closes, closeSma16, (a, b) => a - b);
 
     const onBuyCurrencyClicked = buyCurrency.bind(this, tradeAnalysis.securitySymbol, this.state.buyUsdAmount);
     const onSellCurrencyClicked = sellCurrency.bind(this, tradeAnalysis.securitySymbol, this.state.sellCurrencyAmount);
     const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
     const onSellCurrencyAmountChange = this.onSellCurrencyAmountChange.bind(this);
+
+    const ast = new Ast.BinaryOperator(
+      Ast.BinaryOperatorType.SUBTRACTION,
+      new Ast.Identifier("high"),
+      new Ast.Identifier("low")
+    );
+    const customValues = Ast.evaluate(ast, tradeAnalysis);
 
     return (
       <div style={{ width: CHART_WIDTH + "px", float: "left", margin: "10px" }}>
@@ -526,6 +613,46 @@ class App extends React.Component<{}, AppState> {
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
           highlightedColumnIndex={highlightedColumnIndex}
+        />
+
+        <LineChart
+          chartTitle="Close"
+          values={tradeAnalysis.closes}
+          width={CHART_WIDTH}
+          height={300}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Custom Values"
+          values={customValues}
+          width={CHART_WIDTH}
+          height={300}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Close SMA 16"
+          values={closeSma16}
+          width={CHART_WIDTH}
+          height={300}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+        />
+
+        <LineChart
+          chartTitle="Close - Close SMA 16"
+          values={closeMinusCloseSma8}
+          width={CHART_WIDTH}
+          height={300}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
         />
 
         <HistogramChart
