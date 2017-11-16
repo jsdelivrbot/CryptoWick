@@ -20,15 +20,6 @@ import "./App.css";
 
 //const logo = require("./logo.svg");
 
-const ARROW_LEFT_KEY_CODE = 37;
-const ARROW_RIGHT_KEY_CODE = 39;
-
-const REFRESH_INTERVAL_IN_SECONDS = 30;
-
-const CHART_WIDTH = 600;
-
-const CANDLESTICK_INTERVAL_IN_MINUTES = 15;
-
 // AST Stuff
 namespace Ast {
   type AstNode =
@@ -127,6 +118,37 @@ namespace Ast {
     return Maths.laggingSimpleMovingAverage(valuesToAverage, lookbackLength);
   }
 }
+
+const ARROW_LEFT_KEY_CODE = 37;
+const ARROW_RIGHT_KEY_CODE = 39;
+
+const REFRESH_INTERVAL_IN_SECONDS = 30;
+
+const CHART_WIDTH = 600;
+
+const CANDLESTICK_INTERVAL_IN_MINUTES = 15;
+
+const sma16AstNode = (
+  new Ast.FunctionCall(
+    new Ast.Identifier("sma"),
+    [
+      new Ast.NumberLiteral(16),
+      new Ast.Identifier("close")
+    ]
+  )
+);
+
+const customLineChartAsts = [
+  new Ast.Identifier("close"),
+  sma16AstNode,
+  new Ast.FunctionCall(
+    new Ast.Identifier("sub"),
+    [
+      new Ast.Identifier("close"),
+      sma16AstNode
+    ]
+  )
+];
 
 let refreshCandlesticksIntervalHandle: number;
 
@@ -621,15 +643,6 @@ class App extends React.Component<{}, AppState> {
     const onBuyUsdAmountChange = (event: any) => this.onBuyUsdAmountChange(event, tradeAnalysis.securitySymbol);
     const onSellCurrencyAmountChange = (event: any) => this.onSellCurrencyAmountChange(event, tradeAnalysis.securitySymbol);
 
-    const ast = new Ast.FunctionCall(
-      new Ast.Identifier("sma"),
-      [
-        new Ast.NumberLiteral(16),
-        new Ast.Identifier("close")
-      ]
-    );
-    const customValues = Ast.evaluate(ast, tradeAnalysis);
-
     return (
       <div style={{ width: CHART_WIDTH + "px", float: "left", margin: "10px" }}>
         {tradeAnalysis ? <p>Last: {tradeAnalysis.closes[tradeAnalysis.candlestickCount - 1]}</p> : null}
@@ -679,45 +692,17 @@ class App extends React.Component<{}, AppState> {
           highlightedColumnIndex={highlightedColumnIndex}
         />
 
-        <LineChart
-          chartTitle="Close"
-          values={tradeAnalysis.closes}
-          width={CHART_WIDTH}
-          height={300}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <LineChart
-          chartTitle="Custom Values"
-          values={customValues}
-          width={CHART_WIDTH}
-          height={300}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <LineChart
-          chartTitle="Close SMA 16"
-          values={closeSma16}
-          width={CHART_WIDTH}
-          height={300}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <LineChart
-          chartTitle="Close - Close SMA 16"
-          values={closeMinusCloseSma8}
-          width={CHART_WIDTH}
-          height={300}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
+        {customLineChartAsts.map(node => (
+          <LineChart
+            chartTitle="Custom Values"
+            values={Ast.evaluate(node, tradeAnalysis)}
+            width={CHART_WIDTH}
+            height={300}
+            columnWidth={columnWidth}
+            columnHorizontalPadding={columnHorizontalPadding}
+            scrollOffsetInColumns={scrollOffsetInColumns}
+          />
+        ))}
 
         <LineChart
           chartTitle="SMA 50 1st d/dt"
