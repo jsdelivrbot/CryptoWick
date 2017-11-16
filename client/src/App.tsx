@@ -31,7 +31,17 @@ const CANDLESTICK_INTERVAL_IN_MINUTES = 15;
 
 // AST Stuff
 namespace Ast {
-  type AstNode = Identifier | BinaryOperator;
+  type AstNode =
+      NumberLiteral
+    | Identifier
+    | BinaryOperator
+    | FunctionCall;
+
+  export class NumberLiteral {
+    public readonly typeName: "NumberLiteral" = "NumberLiteral";
+
+    constructor(public value: number) {}
+  }
 
   export class Identifier {
     public readonly typeName: "Identifier" = "Identifier";
@@ -51,13 +61,26 @@ namespace Ast {
     constructor(public type: BinaryOperatorType, public operand1: AstNode, public operand2: AstNode) {}
   }
 
+  export class FunctionCall {
+    public readonly typeName: "FunctionCall" = "FunctionCall";
+
+    constructor(public identifier: Identifier, public args: AstNode[]) {}
+  }
+
   export function evaluate(node: AstNode, tradeAnalysis: TradeAnalysis): number[] {
     switch(node.typeName) {
       case "Identifier":
         return evaluateIdentifier(node, tradeAnalysis);
+      case "NumberLiteral":
+        return evaluateNumberLiteral(node, tradeAnalysis);
       case "BinaryOperator":
         return evaluateBinaryOperator(node, tradeAnalysis);
+      case "FunctionCall":
+        return evaluateFunctionCall(node, tradeAnalysis);
     }
+  }
+  export function evaluateNumberLiteral(numberLiteral: NumberLiteral, tradeAnalysis: TradeAnalysis): number[] {
+    return ArrayUtils.generateArray(tradeAnalysis.candlestickCount, i => numberLiteral.value);
   }
   export function evaluateIdentifier(identifier: Identifier, tradeAnalysis: TradeAnalysis): number[] {
     switch(identifier.text) {
@@ -102,6 +125,28 @@ namespace Ast {
       default:
         throw new Error(`Unknown binary operator: ${binaryOperator.type}`);
     }
+  }
+  export function evaluateFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
+    switch(functionCall.identifier.text) {
+      case "sma":
+        return evaluateSmaFunctionCall(functionCall, tradeAnalysis);
+      default:
+        throw new Error(`Unknown function: ${functionCall.identifier.text}`);
+    }
+  }
+  export function evaluateSmaFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
+    if(functionCall.args.length !== 2) {
+      throw new Error(`${functionCall.identifier.text} expects 2 arguments, but received ${functionCall.args.length}`);
+    }
+
+    if(functionCall.args[0].typeName !== "NumberLiteral") {
+      throw new Error("Invalid function argument types.");
+    }
+    
+    const valuesToAverage = evaluate(functionCall.args[1], tradeAnalysis);
+    const lookbackLength = (functionCall.args[0] as NumberLiteral).value;
+
+    return Maths.laggingSimpleMovingAverage(valuesToAverage, lookbackLength);
   }
 }
 
@@ -351,8 +396,11 @@ function sellCurrency(securitySymbol: string, currencyAmount: number): Promise<a
 initialize();
 
 interface AppState {
-  buyUsdAmount: string;
-  sellCurrencyAmount: string;
+  btcBuyUsdAmount: string;
+  btcSellCurrencyAmount: string;
+
+  ethBuyUsdAmount: string;
+  ethSellCurrencyAmount: string;
 
   showHeikinAshiCandlesticks: boolean;
   scrollOffsetInColumns: number;
@@ -369,8 +417,10 @@ class App extends React.Component<{}, AppState> {
     super();
 
     this.state = {
-      buyUsdAmount: "",
-      sellCurrencyAmount: "",
+      btcBuyUsdAmount: "",
+      btcSellCurrencyAmount: "",
+      ethBuyUsdAmount: "",
+      ethSellCurrencyAmount: "",
       showHeikinAshiCandlesticks: false,
       scrollOffsetInColumns: 0,
       showSettings: false
@@ -380,12 +430,31 @@ class App extends React.Component<{}, AppState> {
   onCurrentCurrencyChange(event: any) {
   }
 
-  onBuyUsdAmountChange(event: any) {
-    this.setState({ buyUsdAmount: event.target.value });
+  onBuyUsdAmountChange(event: any, securitySymbol: string) {
+    switch(securitySymbol) {
+      case "BTCUSD":
+      this.setState({ btcBuyUsdAmount: event.target.value });
+        break;
+      case "ETHUSD":
+      this.setState({ ethBuyUsdAmount: event.target.value });
+        break;
+      default:
+        throw new Error(`Unknown security symbol: ${securitySymbol}`);
+    }
+    
   }
   
-  onSellCurrencyAmountChange(event: any) {
-    this.setState({ sellCurrencyAmount: event.target.value });
+  onSellCurrencyAmountChange(event: any, securitySymbol: string) {
+    switch(securitySymbol) {
+      case "BTCUSD":
+        this.setState({ btcSellCurrencyAmount: event.target.value });
+        break;
+      case "ETHUSD":
+        this.setState({ ethSellCurrencyAmount: event.target.value });
+        break;
+      default:
+        throw new Error(`Unknown security symbol: ${securitySymbol}`);
+    }
   }
 
   onGeminiApiKeyChange(event: any) {
@@ -566,15 +635,20 @@ class App extends React.Component<{}, AppState> {
     const closeSma16 = Maths.laggingSimpleMovingAverage(tradeAnalysis.closes, 16);
     const closeMinusCloseSma8 = ArrayUtils.combineArrays(tradeAnalysis.closes, closeSma16, (a, b) => a - b);
 
-    const onBuyCurrencyClicked = buyCurrency.bind(this, tradeAnalysis.securitySymbol, this.state.buyUsdAmount);
-    const onSellCurrencyClicked = sellCurrency.bind(this, tradeAnalysis.securitySymbol, this.state.sellCurrencyAmount);
-    const onBuyUsdAmountChange = this.onBuyUsdAmountChange.bind(this);
-    const onSellCurrencyAmountChange = this.onSellCurrencyAmountChange.bind(this);
+    const buyUsdAmount = (tradeAnalysis.securitySymbol === "BTCUSD") ? this.state.btcBuyUsdAmount : this.state.ethBuyUsdAmount;
+    const sellCurrencyAmount = (tradeAnalysis.securitySymbol === "BTCUSD") ? this.state.btcSellCurrencyAmount : this.state.ethSellCurrencyAmount;
 
-    const ast = new Ast.BinaryOperator(
-      Ast.BinaryOperatorType.SUBTRACTION,
-      new Ast.Identifier("high"),
-      new Ast.Identifier("low")
+    const onBuyCurrencyClicked = buyCurrency.bind(this, tradeAnalysis.securitySymbol, buyUsdAmount);
+    const onSellCurrencyClicked = sellCurrency.bind(this, tradeAnalysis.securitySymbol, sellCurrencyAmount);
+    const onBuyUsdAmountChange = (event: any) => this.onBuyUsdAmountChange(event, tradeAnalysis.securitySymbol);
+    const onSellCurrencyAmountChange = (event: any) => this.onSellCurrencyAmountChange(event, tradeAnalysis.securitySymbol);
+
+    const ast = new Ast.FunctionCall(
+      new Ast.Identifier("sma"),
+      [
+        new Ast.NumberLiteral(16),
+        new Ast.Identifier("close")
+      ]
     );
     const customValues = Ast.evaluate(ast, tradeAnalysis);
 
@@ -584,16 +658,16 @@ class App extends React.Component<{}, AppState> {
 
         <p>{tradingAlgoState.isInTrade ? "IN TRADE" : "NOT IN TRADE"}</p>
 
-        <div style={{display: "none"}}>
+        <div>
           <div>
-            Buy Amount
-            <input type="text" value={this.state.buyUsdAmount} onChange={onBuyUsdAmountChange} />
+            Buy Amount (USD)
+            <input type="text" value={buyUsdAmount} onChange={onBuyUsdAmountChange} />
             <button onClick={onBuyCurrencyClicked}>Buy</button>
           </div>
 
           <div>
             Sell Amount
-            <input type="text" value={this.state.sellCurrencyAmount} onChange={onSellCurrencyAmountChange} />
+            <input type="text" value={sellCurrencyAmount} onChange={onSellCurrencyAmountChange} />
             <button onClick={onSellCurrencyClicked}>Sell</button>
           </div>
         </div>
@@ -609,6 +683,18 @@ class App extends React.Component<{}, AppState> {
           height={300}
           markers={markers}
           lines={lines}
+          columnWidth={columnWidth}
+          columnHorizontalPadding={columnHorizontalPadding}
+          scrollOffsetInColumns={scrollOffsetInColumns}
+          highlightedColumnIndex={highlightedColumnIndex}
+        />
+
+        <HistogramChart
+          chartTitle="Volume"
+          values={tradeAnalysis.volumes}
+          colors={candlestickColors}
+          width={CHART_WIDTH}
+          height={100}
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
@@ -653,18 +739,6 @@ class App extends React.Component<{}, AppState> {
           columnWidth={columnWidth}
           columnHorizontalPadding={columnHorizontalPadding}
           scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-
-        <HistogramChart
-          chartTitle="Volume"
-          values={tradeAnalysis.volumes}
-          colors={candlestickColors}
-          width={CHART_WIDTH}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-          highlightedColumnIndex={highlightedColumnIndex}
         />
 
         <LineChart
