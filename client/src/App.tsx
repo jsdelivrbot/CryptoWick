@@ -34,7 +34,6 @@ namespace Ast {
   type AstNode =
       NumberLiteral
     | Identifier
-    | BinaryOperator
     | FunctionCall;
 
   export class NumberLiteral {
@@ -49,18 +48,6 @@ namespace Ast {
     constructor(public text: string) {}
   }
 
-  export enum BinaryOperatorType {
-    ADDITION,
-    SUBTRACTION,
-    MULTIPLICATION,
-    DIVISION
-  }
-  export class BinaryOperator {
-    public readonly typeName: "BinaryOperator" = "BinaryOperator";
-
-    constructor(public type: BinaryOperatorType, public operand1: AstNode, public operand2: AstNode) {}
-  }
-
   export class FunctionCall {
     public readonly typeName: "FunctionCall" = "FunctionCall";
 
@@ -73,8 +60,6 @@ namespace Ast {
         return evaluateIdentifier(node, tradeAnalysis);
       case "NumberLiteral":
         return evaluateNumberLiteral(node, tradeAnalysis);
-      case "BinaryOperator":
-        return evaluateBinaryOperator(node, tradeAnalysis);
       case "FunctionCall":
         return evaluateFunctionCall(node, tradeAnalysis);
     }
@@ -96,43 +81,36 @@ namespace Ast {
         throw new Error(`Unknown identifier: ${identifier.text}`)
     }
   }
-  export function evaluateBinaryOperator(binaryOperator: BinaryOperator, tradeAnalysis: TradeAnalysis): number[] {
-    switch(binaryOperator.type) {
-      case BinaryOperatorType.ADDITION:
-        return ArrayUtils.combineArrays(
-          evaluate(binaryOperator.operand1, tradeAnalysis),
-          evaluate(binaryOperator.operand2, tradeAnalysis),
-          (a, b) => a + b
-        );
-      case BinaryOperatorType.SUBTRACTION:
-        return ArrayUtils.combineArrays(
-          evaluate(binaryOperator.operand1, tradeAnalysis),
-          evaluate(binaryOperator.operand2, tradeAnalysis),
-          (a, b) => a - b
-        );
-      case BinaryOperatorType.MULTIPLICATION:
-          return ArrayUtils.combineArrays(
-          evaluate(binaryOperator.operand1, tradeAnalysis),
-          evaluate(binaryOperator.operand2, tradeAnalysis),
-          (a, b) => a * b
-        );
-      case BinaryOperatorType.DIVISION:
-          return ArrayUtils.combineArrays(
-          evaluate(binaryOperator.operand1, tradeAnalysis),
-          evaluate(binaryOperator.operand2, tradeAnalysis),
-          (a, b) => a / b
-        );
-      default:
-        throw new Error(`Unknown binary operator: ${binaryOperator.type}`);
-    }
-  }
   export function evaluateFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
     switch(functionCall.identifier.text) {
+      case "add":
+        return evaluateBinaryOperator(functionCall, (a, b) => a + b, tradeAnalysis);
+      case "sub":
+        return evaluateBinaryOperator(functionCall, (a, b) => a - b, tradeAnalysis);
+      case "mul":
+        return evaluateBinaryOperator(functionCall, (a, b) => a * b, tradeAnalysis);
+      case "div":
+        return evaluateBinaryOperator(functionCall, (a, b) => a / b, tradeAnalysis);
       case "sma":
         return evaluateSmaFunctionCall(functionCall, tradeAnalysis);
       default:
         throw new Error(`Unknown function: ${functionCall.identifier.text}`);
     }
+  }
+  export function evaluateBinaryOperator(
+    functionCall: FunctionCall,
+    operatorFunction: (a: number, b: number) => number,
+    tradeAnalysis: TradeAnalysis
+  ): number[] {
+    if(functionCall.args.length !== 2) {
+      throw new Error(`${functionCall.identifier.text} expects 2 arguments, but received ${functionCall.args.length}`);
+    }
+    
+    return ArrayUtils.combineArrays(
+      evaluate(functionCall.args[0], tradeAnalysis),
+      evaluate(functionCall.args[1], tradeAnalysis),
+      operatorFunction
+    );
   }
   export function evaluateSmaFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
     if(functionCall.args.length !== 2) {
