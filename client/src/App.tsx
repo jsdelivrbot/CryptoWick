@@ -22,7 +22,7 @@ import "./App.css";
 
 // AST Stuff
 namespace Ast {
-  type AstNode =
+  export type AstNode =
       NumberLiteral
     | Identifier
     | FunctionCall;
@@ -84,6 +84,10 @@ namespace Ast {
         return evaluateBinaryOperator(functionCall, (a, b) => a / b, tradeAnalysis);
       case "sma":
         return evaluateSmaFunctionCall(functionCall, tradeAnalysis);
+      case "ddt1st":
+        return evaluateDdt1stFunctionCall(functionCall, tradeAnalysis);
+      case "ddt2nd":
+        return evaluateDdt2ndFunctionCall(functionCall, tradeAnalysis);
       default:
         throw new Error(`Unknown function: ${functionCall.identifier.text}`);
     }
@@ -117,6 +121,71 @@ namespace Ast {
 
     return Maths.laggingSimpleMovingAverage(valuesToAverage, lookbackLength);
   }
+  export function evaluateDdt1stFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
+    if(functionCall.args.length !== 1) {
+      throw new Error(`${functionCall.identifier.text} expects 1 argument, but received ${functionCall.args.length}`);
+    }
+    
+    const argValues = evaluate(functionCall.args[0], tradeAnalysis);
+
+    return Maths.movingDerivative(argValues, 1);
+  }
+  export function evaluateDdt2ndFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
+    if(functionCall.args.length !== 1) {
+      throw new Error(`${functionCall.identifier.text} expects 1 argument, but received ${functionCall.args.length}`);
+    }
+    
+    const argValues = evaluate(functionCall.args[0], tradeAnalysis);
+
+    return Maths.movingSecondDerivative(argValues, 1);
+  }
+}
+
+function isAlpha(char: string): boolean {
+  return /^[A-Z]$/i.test(char);
+}
+
+namespace Lexer {
+  export enum TokenType {
+    IDENTIFIER
+  }
+  export class Token {
+    constructor(public type: TokenType, public text: string) {}
+  }
+
+  export function tokenizeIdentifier(text: string, startIndex: number): Token | null {
+    let i = startIndex;
+
+    while((i < text.length) && isAlpha(text[i])) {
+      i++;
+    }
+
+    let identifierLength = i - startIndex;
+    
+    return (identifierLength > 0)
+      ? new Token(TokenType.IDENTIFIER, text.substr(startIndex, identifierLength))
+      : null;
+  }
+}
+
+namespace Parser {
+  export function parse(text: string): Ast.AstNode | null {
+    let tokens = [];
+
+    const identToken = Lexer.tokenizeIdentifier("close", 0);
+    if(!identToken) { return null; }
+    
+    tokens.push(identToken);
+
+    return Parser.parseIdentifier(tokens, 0);
+  }
+  export function parseIdentifier(tokens: Lexer.Token[], startIndex: number): Ast.Identifier | null {
+    Debug.assert(startIndex < tokens.length);
+
+    return (tokens[startIndex].type === Lexer.TokenType.IDENTIFIER)
+      ? new Ast.Identifier(tokens[startIndex].text)
+      : null;
+  }
 }
 
 const ARROW_LEFT_KEY_CODE = 37;
@@ -128,7 +197,7 @@ const CHART_WIDTH = 600;
 
 const CANDLESTICK_INTERVAL_IN_MINUTES = 15;
 
-const sma16AstNode = (
+const closeSma16AstNode = (
   new Ast.FunctionCall(
     new Ast.Identifier("sma"),
     [
@@ -137,18 +206,59 @@ const sma16AstNode = (
     ]
   )
 );
-
-const customLineChartAsts = [
-  new Ast.Identifier("close"),
-  sma16AstNode,
+const closeSma50AstNode = (
   new Ast.FunctionCall(
-    new Ast.Identifier("sub"),
+    new Ast.Identifier("sma"),
     [
-      new Ast.Identifier("close"),
-      sma16AstNode
+      new Ast.NumberLiteral(50),
+      new Ast.Identifier("close")
     ]
   )
-];
+);
+
+class CustomChart {
+  constructor(public title: string, public ast: Ast.AstNode) {}
+}
+
+var customLineCharts: CustomChart[] = [];
+
+let tmpAst = Parser.parse("close");
+if(tmpAst) {
+  customLineCharts.push(new CustomChart("Close", tmpAst));
+}
+
+customLineCharts.push(new CustomChart("SMA 16 Close", closeSma16AstNode),);
+customLineCharts.push(new CustomChart("Close - SMA 16 Close", new Ast.FunctionCall(
+  new Ast.Identifier("sub"),
+  [
+    new Ast.Identifier("close"),
+    closeSma16AstNode
+  ]
+)));
+customLineCharts.push(new CustomChart("SMA 50 1st d/dt", new Ast.FunctionCall(
+  new Ast.Identifier("ddt1st"),
+  [
+    closeSma50AstNode
+  ]
+)));
+customLineCharts.push(new CustomChart("SMA 50 2nd d/dt SMA 4", new Ast.FunctionCall(
+  new Ast.Identifier("sma"),
+  [
+    new Ast.NumberLiteral(4),
+    new Ast.FunctionCall(
+      new Ast.Identifier("ddt2nd"),
+      [
+        new Ast.FunctionCall(
+          new Ast.Identifier("sma"),
+          [
+            new Ast.NumberLiteral(50),
+            new Ast.Identifier("close")
+          ]
+        )
+      ]
+    )
+  ]
+)));
 
 let refreshCandlesticksIntervalHandle: number;
 
@@ -692,10 +802,10 @@ class App extends React.Component<{}, AppState> {
           highlightedColumnIndex={highlightedColumnIndex}
         />
 
-        {customLineChartAsts.map(node => (
+        {customLineCharts.map(chart => (
           <LineChart
-            chartTitle="Custom Values"
-            values={Ast.evaluate(node, tradeAnalysis)}
+            chartTitle={chart.title}
+            values={Ast.evaluate(chart.ast, tradeAnalysis)}
             width={CHART_WIDTH}
             height={300}
             columnWidth={columnWidth}
@@ -703,25 +813,6 @@ class App extends React.Component<{}, AppState> {
             scrollOffsetInColumns={scrollOffsetInColumns}
           />
         ))}
-
-        <LineChart
-          chartTitle="SMA 50 1st d/dt"
-          values={tradeAnalysis.sma50Derivative1st}
-          width={CHART_WIDTH}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
-        <LineChart
-          chartTitle="SMA 50 2nd d/dt SMA 4"
-          values={sma50Derivative2ndSma4}
-          width={CHART_WIDTH}
-          height={100}
-          columnWidth={columnWidth}
-          columnHorizontalPadding={columnHorizontalPadding}
-          scrollOffsetInColumns={scrollOffsetInColumns}
-        />
       </div>
     );
 
