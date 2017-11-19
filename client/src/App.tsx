@@ -42,7 +42,7 @@ namespace Ast {
   export class FunctionCall {
     public readonly typeName: "FunctionCall" = "FunctionCall";
 
-    constructor(public identifier: Identifier, public args: AstNode[]) {}
+    constructor(public expression: AstNode, public args: AstNode[]) {}
   }
 
   export function evaluate(node: AstNode, tradeAnalysis: TradeAnalysis): number[] {
@@ -73,15 +73,18 @@ namespace Ast {
     }
   }
   export function evaluateFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
-    switch(functionCall.identifier.text) {
+    if(!(functionCall.expression instanceof Identifier)) { throw new Error("Invalid function call."); }
+
+    const identifier = functionCall.expression as Identifier;
+    switch(identifier.text) {
       case "add":
-        return evaluateBinaryOperator(functionCall, (a, b) => a + b, tradeAnalysis);
+        return evaluateBinaryOperator(identifier, functionCall.args, (a, b) => a + b, tradeAnalysis);
       case "sub":
-        return evaluateBinaryOperator(functionCall, (a, b) => a - b, tradeAnalysis);
+        return evaluateBinaryOperator(identifier, functionCall.args, (a, b) => a - b, tradeAnalysis);
       case "mul":
-        return evaluateBinaryOperator(functionCall, (a, b) => a * b, tradeAnalysis);
+        return evaluateBinaryOperator(identifier, functionCall.args, (a, b) => a * b, tradeAnalysis);
       case "div":
-        return evaluateBinaryOperator(functionCall, (a, b) => a / b, tradeAnalysis);
+        return evaluateBinaryOperator(identifier, functionCall.args, (a, b) => a / b, tradeAnalysis);
       case "sma":
         return evaluateSmaFunctionCall(functionCall, tradeAnalysis);
       case "ddt1st":
@@ -89,27 +92,28 @@ namespace Ast {
       case "ddt2nd":
         return evaluateDdt2ndFunctionCall(functionCall, tradeAnalysis);
       default:
-        throw new Error(`Unknown function: ${functionCall.identifier.text}`);
+        throw new Error(`Unknown function: ${identifier.text}`);
     }
   }
   export function evaluateBinaryOperator(
-    functionCall: FunctionCall,
+    identifier: Identifier,
+    args: AstNode[],
     operatorFunction: (a: number, b: number) => number,
     tradeAnalysis: TradeAnalysis
   ): number[] {
-    if(functionCall.args.length !== 2) {
-      throw new Error(`${functionCall.identifier.text} expects 2 arguments, but received ${functionCall.args.length}`);
+    if(args.length !== 2) {
+      throw new Error(`${identifier.text} expects 2 arguments, but received ${args.length}`);
     }
     
     return ArrayUtils.combineArrays(
-      evaluate(functionCall.args[0], tradeAnalysis),
-      evaluate(functionCall.args[1], tradeAnalysis),
+      evaluate(args[0], tradeAnalysis),
+      evaluate(args[1], tradeAnalysis),
       operatorFunction
     );
   }
   export function evaluateSmaFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
     if(functionCall.args.length !== 2) {
-      throw new Error(`${functionCall.identifier.text} expects 2 arguments, but received ${functionCall.args.length}`);
+      throw new Error(`Function expects 2 arguments, but received ${functionCall.args.length}`);
     }
 
     if(functionCall.args[0].typeName !== "NumberLiteral") {
@@ -123,7 +127,7 @@ namespace Ast {
   }
   export function evaluateDdt1stFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
     if(functionCall.args.length !== 1) {
-      throw new Error(`${functionCall.identifier.text} expects 1 argument, but received ${functionCall.args.length}`);
+      throw new Error(`Function expects 1 argument, but received ${functionCall.args.length}`);
     }
     
     const argValues = evaluate(functionCall.args[0], tradeAnalysis);
@@ -132,7 +136,7 @@ namespace Ast {
   }
   export function evaluateDdt2ndFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
     if(functionCall.args.length !== 1) {
-      throw new Error(`${functionCall.identifier.text} expects 1 argument, but received ${functionCall.args.length}`);
+      throw new Error(`Function expects 1 argument, but received ${functionCall.args.length}`);
     }
     
     const argValues = evaluate(functionCall.args[0], tradeAnalysis);
@@ -141,18 +145,101 @@ namespace Ast {
   }
 }
 
+
 function isAlpha(char: string): boolean {
   return /^[A-Z]$/i.test(char);
+}
+function isDigit(char: string): boolean {
+  return /^[0-9]$/.test(char);
+}
+function isWhiteSpace(char: string): boolean {
+  return /^\s$/.test(char);
+}
+
+function forEachBreakableMap<K, V>(x: Map<K, V>, iteratee: (key: K, value: V) => boolean) {
+  let hasExecutedBreak = false;
+
+  x.forEach((value, key) => {
+    if(hasExecutedBreak) { return; }
+
+    if(!iteratee(key, value)) { hasExecutedBreak = true; }
+  });
+}
+function mapMap<K, V, V2>(x: Map<K, V>, iteratee: (key: K, value: V) => V2): Map<K, V2> {
+  let newMap = new Map<K, V2>();
+
+  x.forEach((value, key) => {
+    newMap.set(key, iteratee(key, value));
+  });
+
+  return newMap;
 }
 
 namespace Lexer {
   export enum TokenType {
-    IDENTIFIER
+    IDENTIFIER,
+    NUMBER_LITERAL,
+
+    LEFT_PAREN,
+    RIGHT_PAREN,
+    COMMA
   }
   export class Token {
     constructor(public type: TokenType, public text: string) {}
   }
 
+  function createTokenRegExpsByTokenType(): Map<TokenType, RegExp> {
+    let tokenRegExpsByTokenType = new Map<TokenType, RegExp>();
+    tokenRegExpsByTokenType.set(TokenType.IDENTIFIER, /[a-zA-Z][a-zA-Z0-9]+/);
+    tokenRegExpsByTokenType.set(TokenType.NUMBER_LITERAL, /([0-9]+(\.[0-9]*)?)|(\.[0-9]+)/);
+
+    return mapMap(tokenRegExpsByTokenType, (key, value) => new RegExp("^" + value.source));
+  }
+
+  export function tokenize(text: string): Token[] | null {
+    let tokens = new Array<Token>();
+    let textLeft = text;
+    const tokenRegExpsByTokenType = createTokenRegExpsByTokenType();
+
+    while(textLeft.length > 0) {
+      const oldTextLeftLength = textLeft.length;
+      const nextChar = textLeft[0];
+
+      if(nextChar === '(') {
+        tokens.push(new Token(TokenType.LEFT_PAREN, nextChar));
+        textLeft = textLeft.substr(1);
+      } else if(nextChar === ')') {
+        tokens.push(new Token(TokenType.RIGHT_PAREN, nextChar));
+        textLeft = textLeft.substr(1);
+      } else if(nextChar === ',') {
+        tokens.push(new Token(TokenType.COMMA, nextChar));
+        textLeft = textLeft.substr(1);
+      } else if(isWhiteSpace(nextChar)) {
+        textLeft = textLeft.substr(1);
+      } else {
+        forEachBreakableMap(tokenRegExpsByTokenType, (tokenType, regExp) => {
+          const regExpMatch = regExp.exec(textLeft);
+          
+          if(regExpMatch) {
+            const tokenText = regExpMatch[0];
+            tokens.push(new Token(tokenType, tokenText));
+  
+            textLeft = textLeft.substr(tokenText.length);
+            
+            return false; // break
+          } else {
+            return true; // continue
+          }
+        });
+      }
+
+      if(textLeft.length === oldTextLeftLength) {
+        return null;
+      }
+    }
+
+    return tokens;
+  }
   export function tokenizeIdentifier(text: string, startIndex: number): Token | null {
     let i = startIndex;
 
@@ -166,25 +253,145 @@ namespace Lexer {
       ? new Token(TokenType.IDENTIFIER, text.substr(startIndex, identifierLength))
       : null;
   }
+  export function tokenizeNumberLiteral(text: string, startIndex: number): Token | null {
+    let i = startIndex;
+    
+        while((i < text.length) && (isDigit(text[i]) || (text[i] == '.'))) {
+          i++;
+        }
+    
+        let identifierLength = i - startIndex;
+        
+        return (identifierLength > 0)
+          ? new Token(TokenType.NUMBER_LITERAL, text.substr(startIndex, identifierLength))
+          : null;
+  }
 }
 
 namespace Parser {
-  export function parse(text: string): Ast.AstNode | null {
-    let tokens = [];
-
-    const identToken = Lexer.tokenizeIdentifier("close", 0);
-    if(!identToken) { return null; }
-    
-    tokens.push(identToken);
-
-    return Parser.parseIdentifier(tokens, 0);
+  export class ParserState {
+    tokens: Lexer.Token[];
+    tokenIndex: number;
   }
-  export function parseIdentifier(tokens: Lexer.Token[], startIndex: number): Ast.Identifier | null {
-    Debug.assert(startIndex < tokens.length);
 
-    return (tokens[startIndex].type === Lexer.TokenType.IDENTIFIER)
-      ? new Ast.Identifier(tokens[startIndex].text)
-      : null;
+  function readExpectedToken(parserState: ParserState, tokenType: Lexer.TokenType): boolean {
+    if(
+      (parserState.tokenIndex < parserState.tokens.length) &&
+      (parserState.tokens[parserState.tokenIndex].type === tokenType)
+    ) {
+      parserState.tokenIndex++;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  export function parse(text: string): Ast.AstNode | null {
+    let tokens = Lexer.tokenize(text);
+    if(!tokens || tokens.length == 0) { return null; }
+
+    let parserState = new ParserState();
+    parserState.tokens = tokens
+    parserState.tokenIndex = 0;
+
+    return parseExpression(parserState);
+  }
+
+  export function parseExpression(parserState: ParserState): Ast.AstNode | null {
+    let expression: Ast.AstNode | null = null;
+    
+    if(parserState.tokenIndex < parserState.tokens.length) {
+      let nextToken = parserState.tokens[parserState.tokenIndex];
+      switch(nextToken.type) {
+        case Lexer.TokenType.IDENTIFIER:
+          const identifier = parseIdentifier(parserState);
+  
+          if(identifier) {
+            expression = identifier;
+          }
+  
+          break;
+        case Lexer.TokenType.NUMBER_LITERAL:
+          const numberLiteral = parseNumberLiteral(parserState);
+
+          if(numberLiteral) {
+            expression = numberLiteral;
+          }
+          
+          break;
+        default:
+          throw new Error(`Unknown token: ${nextToken.type}`);
+      }
+    }
+    
+    if(!expression) { return null; }
+    while(parserState.tokenIndex < parserState.tokens.length) {
+      const nextToken = parserState.tokens[parserState.tokenIndex];
+
+      if(nextToken.type === Lexer.TokenType.LEFT_PAREN) {
+        if(expression) {
+          expression = parseFunctionCall(parserState, expression);
+        } else {
+          return null;
+        }
+      } else {
+        break;
+      }
+    }
+
+    return expression;
+  }
+  export function parseIdentifier(parserState: ParserState): Ast.Identifier | null {
+    if(parserState.tokens[parserState.tokenIndex].type === Lexer.TokenType.IDENTIFIER) {
+      const identifier = new Ast.Identifier(parserState.tokens[parserState.tokenIndex].text);
+
+      parserState.tokenIndex++;
+
+      return identifier;
+    } else {
+      return null;
+    }
+  }
+  export function parseNumberLiteral(parserState: ParserState): Ast.NumberLiteral | null {
+    if(parserState.tokens[parserState.tokenIndex].type === Lexer.TokenType.NUMBER_LITERAL) {
+      const numberLiteral = new Ast.NumberLiteral(parseFloat(parserState.tokens[parserState.tokenIndex].text));
+
+      parserState.tokenIndex++;
+
+      return numberLiteral;
+    } else {
+      return null;
+    }
+  }
+  export function parseFunctionCall(parserState: ParserState, functionExpr: Ast.AstNode): Ast.FunctionCall | null {
+    if(parserState.tokens[parserState.tokenIndex].type === Lexer.TokenType.LEFT_PAREN) {
+      let functionArgs: Ast.AstNode[] = [];
+
+      // parse argument tuple
+      parserState.tokenIndex++; // skip the '('
+      if(parserState.tokenIndex >= parserState.tokens.length) { return null; }
+
+      while(parserState.tokens[parserState.tokenIndex].type !== Lexer.TokenType.RIGHT_PAREN) {
+        if(functionArgs.length > 0) {
+          if(!readExpectedToken(parserState, Lexer.TokenType.COMMA)) {
+            return null;
+          }
+        }
+
+        let arg = parseExpression(parserState);
+        if(arg) {
+          functionArgs.push(arg);
+        } else {
+          return null;
+        }
+      }
+
+      parserState.tokenIndex++; // skip the ')'
+      
+      return new Ast.FunctionCall(functionExpr, functionArgs);
+    } else {
+      return null;
+    }
   }
 }
 
@@ -220,45 +427,21 @@ class CustomChart {
   constructor(public title: string, public ast: Ast.AstNode) {}
 }
 
-var customLineCharts: CustomChart[] = [];
-
-let tmpAst = Parser.parse("close");
-if(tmpAst) {
-  customLineCharts.push(new CustomChart("Close", tmpAst));
+function unwrapMaybe<T>(value: T | null): T {
+  if(value) {
+    return value;
+  } else {
+    throw new Error("Tried to unwrap a null value.");
+  }
 }
 
-customLineCharts.push(new CustomChart("SMA 16 Close", closeSma16AstNode),);
-customLineCharts.push(new CustomChart("Close - SMA 16 Close", new Ast.FunctionCall(
-  new Ast.Identifier("sub"),
-  [
-    new Ast.Identifier("close"),
-    closeSma16AstNode
-  ]
-)));
-customLineCharts.push(new CustomChart("SMA 50 1st d/dt", new Ast.FunctionCall(
-  new Ast.Identifier("ddt1st"),
-  [
-    closeSma50AstNode
-  ]
-)));
-customLineCharts.push(new CustomChart("SMA 50 2nd d/dt SMA 4", new Ast.FunctionCall(
-  new Ast.Identifier("sma"),
-  [
-    new Ast.NumberLiteral(4),
-    new Ast.FunctionCall(
-      new Ast.Identifier("ddt2nd"),
-      [
-        new Ast.FunctionCall(
-          new Ast.Identifier("sma"),
-          [
-            new Ast.NumberLiteral(50),
-            new Ast.Identifier("close")
-          ]
-        )
-      ]
-    )
-  ]
-)));
+var customLineCharts = [
+  new CustomChart("Close", unwrapMaybe(Parser.parse("close"))),
+  new CustomChart("SMA 16 Close", unwrapMaybe(Parser.parse("sma(16, close)"))),
+  new CustomChart("Close - SMA 16 Close", unwrapMaybe(Parser.parse("sub(close, sma(16, close))"))),
+  new CustomChart("SMA 50 1st d/dt", unwrapMaybe(Parser.parse("ddt1st(sma(50, close))"))),
+  new CustomChart("SMA 50 2nd d/dt SMA 4", unwrapMaybe(Parser.parse("sma(4, ddt2nd(sma(50, close)))")))
+];
 
 let refreshCandlesticksIntervalHandle: number;
 
@@ -346,7 +529,8 @@ function reloadGeminiBalances() {
       }
 
       rerender();
-    });
+    })
+    .catch(err => {});
 }
 function updateTradingAlgoWithNewTradeAnalysis(tradeAnalysis: TradeAnalysis, tradingAlgoState: TradingAlgorithmState) {
   if(!tradeAnalysis) { return; }

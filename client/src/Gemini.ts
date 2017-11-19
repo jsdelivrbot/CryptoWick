@@ -9,8 +9,7 @@ export function loadAccountBalances(apiKey: string, apiSecret: string) {
   return callGeminiPrivateApi(apiKey, apiSecret, "https://api.gemini.com/v1/balances", payload)
     .then(response => {
       if (!response.ok) {
-        console.log("Error fetching data from Gemini.");
-        return;
+        throw new Error("Error fetching data from Gemini.");
       }
 
       return response.json();

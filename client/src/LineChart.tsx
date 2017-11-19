@@ -27,8 +27,13 @@ export class LineChart extends React.Component<LineChartProps, {}> {
     return i;
   }
   valueToY(value: number): number {
-    const minValue = Math.min(...this.props.values);
-    const maxValue = Math.max(...this.props.values);
+    let minValue = Math.min(...this.props.values);
+    let maxValue = Math.max(...this.props.values);
+
+    if (minValue === maxValue) {
+      minValue *= 1.5;
+      maxValue *= 0.5;
+    }
 
     const valueRange = maxValue - minValue;
     const yPercentFromBottom = (value - minValue) / valueRange;
