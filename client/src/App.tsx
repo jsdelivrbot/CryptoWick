@@ -709,6 +709,7 @@ interface AppState {
 
   showHeikinAshiCandlesticks: boolean;
   scrollOffsetInColumns: number;
+  highlightedColumnIndex: number;
   showSettings: boolean;
 }
 
@@ -728,6 +729,7 @@ class App extends React.Component<{}, AppState> {
       ethSellCurrencyAmount: "",
       showHeikinAshiCandlesticks: false,
       scrollOffsetInColumns: 0,
+      highlightedColumnIndex: 0,
       showSettings: false
     };
   }
@@ -882,7 +884,7 @@ class App extends React.Component<{}, AppState> {
     const columnHorizontalPadding = 1;
 
     const scrollOffsetInColumns = this.state.scrollOffsetInColumns;
-    const highlightedColumnIndex = 1;
+    const highlightedColumnIndex = this.state.highlightedColumnIndex;
 
     let markers = new Array<Array<CandlestickMarker>>(tradeAnalysis.candlestickCount);
     for(let i = 0; i < markers.length; i++) {
@@ -954,8 +956,17 @@ class App extends React.Component<{}, AppState> {
     const onBuyUsdAmountChange = (event: any) => this.onBuyUsdAmountChange(event, tradeAnalysis.securitySymbol);
     const onSellCurrencyAmountChange = (event: any) => this.onSellCurrencyAmountChange(event, tradeAnalysis.securitySymbol);
 
+    const horizontalMargin = 10;
+    const onMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+      const boundingRect = event.currentTarget.getBoundingClientRect();
+      const xInColumnDiv = event.clientX - boundingRect.left;
+      const colIndex = Utils.xToColumnIndex(CHART_WIDTH, columnWidth, tradeAnalysis.candlestickCount, scrollOffsetInColumns, xInColumnDiv);
+
+      this.setState({ highlightedColumnIndex: colIndex });
+    };
+    
     return (
-      <div style={{ width: CHART_WIDTH + "px", float: "left", margin: "10px" }}>
+      <div onMouseMove={onMouseMove} style={{ width: CHART_WIDTH + "px", float: "left", margin: "10px" }}>
         {tradeAnalysis ? <p>Last: {tradeAnalysis.closes[tradeAnalysis.candlestickCount - 1]}</p> : null}
 
         <p>{tradingAlgoState.isInTrade ? "IN TRADE" : "NOT IN TRADE"}</p>
@@ -1012,6 +1023,7 @@ class App extends React.Component<{}, AppState> {
             columnWidth={columnWidth}
             columnHorizontalPadding={columnHorizontalPadding}
             scrollOffsetInColumns={scrollOffsetInColumns}
+            highlightedColumnIndex={highlightedColumnIndex}
           />
         ))}
       </div>

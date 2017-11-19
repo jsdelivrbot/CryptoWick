@@ -194,4 +194,12 @@ export function iFromRightToColumnX(chartWidth: number, columnWidth: number, scr
   return columnX;
 }
 
+export function xToColumnIndex(chartWidth: number, columnWidth: number, columnCount: number, scrollOffsetInColumns: number, x: number): number {
+  const xFromRight = x - chartWidth;
+  const unscrolledIFromRight = Math.ceil(xFromRight / columnWidth);
+  const scrolledIFromRight = unscrolledIFromRight + scrollOffsetInColumns;
+
+  return (columnCount - 1) + scrolledIFromRight;
+}
+
 export const COLUMN_HIGHLIGHT_FILL_STYLE = "rgba(0, 0, 0, 0.2)";
