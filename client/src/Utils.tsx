@@ -2,6 +2,43 @@ import * as Debug from "./Debug";
 import * as ArrayUtils from "./ArrayUtils";
 import * as Maths from "./Maths";
 
+export function isAlpha(char: string): boolean {
+  return /^[A-Z]$/i.test(char);
+}
+export function isDigit(char: string): boolean {
+  return /^[0-9]$/.test(char);
+}
+export function isWhiteSpace(char: string): boolean {
+  return /^\s$/.test(char);
+}
+
+export function forEachBreakableMap<K, V>(x: Map<K, V>, iteratee: (key: K, value: V) => boolean) {
+  let hasExecutedBreak = false;
+
+  x.forEach((value, key) => {
+    if(hasExecutedBreak) { return; }
+
+    if(!iteratee(key, value)) { hasExecutedBreak = true; }
+  });
+}
+export function mapMap<K, V, V2>(x: Map<K, V>, iteratee: (key: K, value: V) => V2): Map<K, V2> {
+  let newMap = new Map<K, V2>();
+
+  x.forEach((value, key) => {
+    newMap.set(key, iteratee(key, value));
+  });
+
+  return newMap;
+}
+
+export function unwrapMaybe<T>(value: T | null): T {
+  if(value) {
+    return value;
+  } else {
+    throw new Error("Tried to unwrap a null value.");
+  }
+}
+
 export enum ExtremaType {
   MINIMA,
   MAXIMA
@@ -101,21 +138,27 @@ export function areMinimaMaximaToExtremas(
   return extrema;
 }
 
-export function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: number): number[] {
-  return closes.map((close, closeIndex) => {
-    const startCandlestickIndex = Math.max(closeIndex - (linRegCandleCount - 1), 0);
-    const pointCount = 1 + (closeIndex - startCandlestickIndex);
+export function lineOfBestFitSlopes(values: number[], linRegValueCount: number): number[] {
+  return values.map((value, i) => {
+    const startValueIndex = Math.max(i - (linRegValueCount - 1), 0);
+    const pointCount = 1 + (i - startValueIndex);
 
-    if(pointCount < linRegCandleCount) { return 0; }
+    if(pointCount < linRegValueCount) { return 0; }
 
     let points = new Array<Maths.Vector2>(pointCount);
 
     for(let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
-      points[pointIndex] = new Maths.Vector2(pointIndex, closes[startCandlestickIndex + pointIndex]);
+      points[pointIndex] = new Maths.Vector2(pointIndex, values[startValueIndex + pointIndex]);
     }
 
-    return Maths.linearLeastSquares(points).m / close;
+    return Maths.linearLeastSquares(points).m;
   });
+}
+
+export function lineOfBestFitPercentCloseSlopes(closes: number[], linRegCandleCount: number): number[] {
+  const slopes = lineOfBestFitSlopes(closes, linRegCandleCount);
+
+  return slopes.map((m, i) => m / closes[i]);
 }
 
 export function areConsecutiveBullishCandlesticks(windowSize: number, opens: number[], closes: number[]): boolean[] {

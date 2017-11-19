@@ -91,6 +91,8 @@ namespace Ast {
         return evaluateDdt1stFunctionCall(functionCall, tradeAnalysis);
       case "ddt2nd":
         return evaluateDdt2ndFunctionCall(functionCall, tradeAnalysis);
+      case "linRegSlope":
+        return evaluateLinRegSlopeFunctionCall(functionCall, tradeAnalysis);
       default:
         throw new Error(`Unknown function: ${identifier.text}`);
     }
@@ -143,39 +145,64 @@ namespace Ast {
 
     return Maths.movingSecondDerivative(argValues, 1);
   }
-}
+  export function evaluateLinRegSlopeFunctionCall(functionCall: FunctionCall, tradeAnalysis: TradeAnalysis): number[] {
+    if(functionCall.args.length !== 2) {
+      throw new Error(`Function expects 2 arguments, but received ${functionCall.args.length}`);
+    }
 
+    if(functionCall.args[0].typeName !== "NumberLiteral") {
+      throw new Error("Invalid function argument types.");
+    }
+    
+    const values = evaluate(functionCall.args[1], tradeAnalysis);
+    const lookbackLength = (functionCall.args[0] as NumberLiteral).value;
 
-function isAlpha(char: string): boolean {
-  return /^[A-Z]$/i.test(char);
-}
-function isDigit(char: string): boolean {
-  return /^[0-9]$/.test(char);
-}
-function isWhiteSpace(char: string): boolean {
-  return /^\s$/.test(char);
-}
-
-function forEachBreakableMap<K, V>(x: Map<K, V>, iteratee: (key: K, value: V) => boolean) {
-  let hasExecutedBreak = false;
-
-  x.forEach((value, key) => {
-    if(hasExecutedBreak) { return; }
-
-    if(!iteratee(key, value)) { hasExecutedBreak = true; }
-  });
-}
-function mapMap<K, V, V2>(x: Map<K, V>, iteratee: (key: K, value: V) => V2): Map<K, V2> {
-  let newMap = new Map<K, V2>();
-
-  x.forEach((value, key) => {
-    newMap.set(key, iteratee(key, value));
-  });
-
-  return newMap;
+    return Utils.lineOfBestFitSlopes(values, lookbackLength);
+  }
 }
 
 namespace Lexer {
+  export class LexerState {
+    text: string;
+    textLeft: string;
+    errors: string[];
+  }
+  function addError(lexerState: LexerState, error: string) {
+    lexerState.errors.push(error);
+  }
+  function peekChar(lexerState: LexerState): string | null {
+    if(lexerState.textLeft.length === 0) {
+      addError(lexerState, "Unexpectedly reached the end of the stream.");
+      return null;
+    }
+
+    return lexerState.textLeft[0];
+  }
+  function readChar(lexerState: LexerState): string | null {
+    if(lexerState.textLeft.length === 0) {
+      addError(lexerState, "Unexpectedly reached the end of the stream.");
+      return null;
+    }
+
+    const nextChar = lexerState.textLeft[0];
+    lexerState.textLeft = lexerState.textLeft.substr(1);
+
+    return nextChar;
+  }
+  function readExpectedChar(lexerState: LexerState, expectedChar: string): string | null {
+    Debug.assert(expectedChar.length === 1);
+
+    const nextChar = readChar(lexerState);
+    if(!nextChar) { return null; }
+
+    if(nextChar !== expectedChar) {
+      addError(lexerState, `Expected '${expectedChar}' but encountered '${nextChar}'.`);
+      return null;
+    }
+
+    return nextChar;
+  }
+
   export enum TokenType {
     IDENTIFIER,
     NUMBER_LITERAL,
@@ -192,79 +219,58 @@ namespace Lexer {
     let tokenRegExpsByTokenType = new Map<TokenType, RegExp>();
     tokenRegExpsByTokenType.set(TokenType.IDENTIFIER, /[a-zA-Z][a-zA-Z0-9]+/);
     tokenRegExpsByTokenType.set(TokenType.NUMBER_LITERAL, /([0-9]+(\.[0-9]*)?)|(\.[0-9]+)/);
+    tokenRegExpsByTokenType.set(TokenType.LEFT_PAREN, /\(/);
+    tokenRegExpsByTokenType.set(TokenType.RIGHT_PAREN, /\)/);
+    tokenRegExpsByTokenType.set(TokenType.COMMA, /,/);
 
-    return mapMap(tokenRegExpsByTokenType, (key, value) => new RegExp("^" + value.source));
+    return Utils.mapMap(tokenRegExpsByTokenType, (key, value) => new RegExp("^" + value.source));
   }
 
   export function tokenize(text: string): Token[] | null {
-    let tokens = new Array<Token>();
-    let textLeft = text;
+    let state = new LexerState();
+    state.text = text;
+    state.textLeft = text;
+
     const tokenRegExpsByTokenType = createTokenRegExpsByTokenType();
 
-    while(textLeft.length > 0) {
-      const oldTextLeftLength = textLeft.length;
-      const nextChar = textLeft[0];
+    let tokens = new Array<Token>();
+    
+    while(state.textLeft.length > 0) {
+      const nextChar = peekChar(state);
+      if(!nextChar) { return null; }
 
-      if(nextChar === '(') {
-        tokens.push(new Token(TokenType.LEFT_PAREN, nextChar));
-        textLeft = textLeft.substr(1);
-      } else if(nextChar === ')') {
-        tokens.push(new Token(TokenType.RIGHT_PAREN, nextChar));
-        textLeft = textLeft.substr(1);
-      } else if(nextChar === ',') {
-        tokens.push(new Token(TokenType.COMMA, nextChar));
-        textLeft = textLeft.substr(1);
-      } else if(isWhiteSpace(nextChar)) {
-        textLeft = textLeft.substr(1);
+      if(Utils.isWhiteSpace(nextChar)) {
+        if(!readChar(state)) { return null; }
       } else {
-        forEachBreakableMap(tokenRegExpsByTokenType, (tokenType, regExp) => {
-          const regExpMatch = regExp.exec(textLeft);
+        let foundMatch = false;
+        
+        Utils.forEachBreakableMap(tokenRegExpsByTokenType, (tokenType, regExp) => {
+          const regExpMatch = regExp.exec(state.textLeft);
           
           if(regExpMatch) {
             const tokenText = regExpMatch[0];
             tokens.push(new Token(tokenType, tokenText));
   
-            textLeft = textLeft.substr(tokenText.length);
+            for(let i = 0; i < tokenText.length; i++) {
+              readChar(state);
+            }
             
+            foundMatch = true;
+  
             return false; // break
           } else {
             return true; // continue
           }
         });
-      }
-
-      if(textLeft.length === oldTextLeftLength) {
-        return null;
+  
+        if(!foundMatch) {
+          addError(state, `Encountered unexpected character '${nextChar}'.`);
+          return null;
+        }
       }
     }
 
     return tokens;
-  }
-  export function tokenizeIdentifier(text: string, startIndex: number): Token | null {
-    let i = startIndex;
-
-    while((i < text.length) && isAlpha(text[i])) {
-      i++;
-    }
-
-    let identifierLength = i - startIndex;
-    
-    return (identifierLength > 0)
-      ? new Token(TokenType.IDENTIFIER, text.substr(startIndex, identifierLength))
-      : null;
-  }
-  export function tokenizeNumberLiteral(text: string, startIndex: number): Token | null {
-    let i = startIndex;
-    
-        while((i < text.length) && (isDigit(text[i]) || (text[i] == '.'))) {
-          i++;
-        }
-    
-        let identifierLength = i - startIndex;
-        
-        return (identifierLength > 0)
-          ? new Token(TokenType.NUMBER_LITERAL, text.substr(startIndex, identifierLength))
-          : null;
   }
 }
 
@@ -272,8 +278,11 @@ namespace Parser {
   export class ParserState {
     tokens: Lexer.Token[];
     tokenIndex: number;
+    errors: string[];
   }
-
+  function addError(parserState: ParserState, error: string) {
+    parserState.errors.push(error);
+  }
   function readExpectedToken(parserState: ParserState, tokenType: Lexer.TokenType): boolean {
     if(
       (parserState.tokenIndex < parserState.tokens.length) &&
@@ -397,6 +406,7 @@ namespace Parser {
 
 const ARROW_LEFT_KEY_CODE = 37;
 const ARROW_RIGHT_KEY_CODE = 39;
+const END_KEY_CODE = 35;
 
 const REFRESH_INTERVAL_IN_SECONDS = 30;
 
@@ -424,23 +434,24 @@ const closeSma50AstNode = (
 );
 
 class CustomChart {
-  constructor(public title: string, public ast: Ast.AstNode) {}
+  constructor(public title: string, public ast: Ast.AstNode, public height: number) {}
 }
 
-function unwrapMaybe<T>(value: T | null): T {
-  if(value) {
-    return value;
-  } else {
-    throw new Error("Tried to unwrap a null value.");
-  }
-}
+const linRegLengths = [3, 5, 10, 15, 20, 30, 40, 50, 75, 100];
 
 var customLineCharts = [
-  new CustomChart("Close", unwrapMaybe(Parser.parse("close"))),
-  new CustomChart("SMA 16 Close", unwrapMaybe(Parser.parse("sma(16, close)"))),
-  new CustomChart("Close - SMA 16 Close", unwrapMaybe(Parser.parse("sub(close, sma(16, close))"))),
-  new CustomChart("SMA 50 1st d/dt", unwrapMaybe(Parser.parse("ddt1st(sma(50, close))"))),
-  new CustomChart("SMA 50 2nd d/dt SMA 4", unwrapMaybe(Parser.parse("sma(4, ddt2nd(sma(50, close)))")))
+  new CustomChart("Close", Utils.unwrapMaybe(Parser.parse("close")), 100),
+  ...linRegLengths.map(l =>
+    new CustomChart(
+      `Lin. Reg. Close Slope ${l}`,
+      Utils.unwrapMaybe(Parser.parse(`linRegSlope(${l}, close)`)),
+      100
+    )
+  ),
+  //new CustomChart("SMA 16 Close", Utils.unwrapMaybe(Parser.parse("sma(16, close)"))),
+  //new CustomChart("Close - SMA 16 Close", Utils.unwrapMaybe(Parser.parse("sub(close, sma(16, close))"))),
+  //new CustomChart("SMA 50 1st d/dt", Utils.unwrapMaybe(Parser.parse("ddt1st(sma(50, close))"))),
+  //new CustomChart("SMA 50 2nd d/dt SMA 4", Utils.unwrapMaybe(Parser.parse("sma(4, ddt2nd(sma(50, close)))")))
 ];
 
 let refreshCandlesticksIntervalHandle: number;
@@ -781,9 +792,15 @@ class App extends React.Component<{}, AppState> {
     switch(event.keyCode) {
       case ARROW_LEFT_KEY_CODE:
         this.setState({ scrollOffsetInColumns: this.state.scrollOffsetInColumns - 1 });
+        event.preventDefault();
         break;
       case ARROW_RIGHT_KEY_CODE:
         this.setState({ scrollOffsetInColumns: this.state.scrollOffsetInColumns + 1 });
+        event.preventDefault();
+        break;
+      case END_KEY_CODE:
+        this.setState({ scrollOffsetInColumns: 0 });
+        event.preventDefault();
         break;
     }
   }
@@ -991,7 +1008,7 @@ class App extends React.Component<{}, AppState> {
             chartTitle={chart.title}
             values={Ast.evaluate(chart.ast, tradeAnalysis)}
             width={CHART_WIDTH}
-            height={300}
+            height={chart.height}
             columnWidth={columnWidth}
             columnHorizontalPadding={columnHorizontalPadding}
             scrollOffsetInColumns={scrollOffsetInColumns}
