@@ -725,7 +725,7 @@ class LandingPage extends React.Component<{}, {}> {
 
                 <div className="panel panel-default">
                   <div className="panel-body">
-                    <h2>New to CryptoWick? Sign Up</h2>
+                    <h3 style={{marginTop: 0, fontWeight: "bold"}}>New to CryptoWick? <span style={{color: "#777"}}>Sign Up</span></h3>
                     <SignUpForm />
                   </div>
                 </div>
@@ -739,45 +739,61 @@ class LandingPage extends React.Component<{}, {}> {
 }
 
 class LogInForm extends React.Component<{}, {}> {
+  onLogInClicked(event: any) {
+    console.log("Log In");
+    event.preventDefault();
+  }
+  onForgotPasswordClicked(event: any) {
+    console.log("Forgot Password");
+    event.preventDefault();
+  }
+
   render() {
+    const onLogInClicked = this.onLogInClicked.bind(this);
+    const onForgotPasswordClicked = this.onForgotPasswordClicked.bind(this);
+
     return (
       <form>
         <div className="form-group">
-          <label>Email</label>
           <input type="email" className="form-control" placeholder="Email" />
         </div>
+
         <div className="form-group">
-          <label>Password</label>
           <input type="password" className="form-control" placeholder="Password" />
         </div>
-        <button className="btn btn-success">Log In</button>
-        <a>Forgot Password?</a>
+
+        <button onClick={onLogInClicked} className="btn btn-success">Log In</button>
+        <a onClick={onForgotPasswordClicked}>Forgot Password?</a>
       </form>
     );
   }
 }
 
 class SignUpForm extends React.Component<{}, {}> {
+  onSignUpClicked(event: any) {
+    console.log("Sign Up");
+    event.preventDefault();
+  }
+
   render() {
+    const onSignUpClicked = this.onSignUpClicked.bind(this);
+
     return (
       <form>
         <div className="form-group">
-          <label>Email</label>
           <input type="email" className="form-control" placeholder="Email" />
         </div>
         <div className="form-group">
-          <label>Phone Number</label>
           <input type="tel" className="form-control" placeholder="Phone Number" />
         </div>
         <div className="form-group">
-          <label>Password</label>
           <input type="password" className="form-control" placeholder="Password" />
         </div>
         <div className="form-group">
-          <label>Confirm Password</label>
           <input type="password" className="form-control" placeholder="Confirm Password" />
         </div>
-        <button className="btn btn-success">Sign Up</button>
+        
+        <button onClick={onSignUpClicked} className="btn btn-success">Sign Up</button>
       </form>
     );
   }
