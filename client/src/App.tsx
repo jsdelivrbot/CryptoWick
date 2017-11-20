@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Route, Link } from "react-router-dom";
 
 import * as Debug from "./Debug";
 import * as Utils from "./Utils";
@@ -700,7 +701,89 @@ function sellCurrency(securitySymbol: string, currencyAmount: number): Promise<a
 
 initialize();
 
-interface AppState {
+class LandingPage extends React.Component<{}, {}> {
+  render() {
+    return (
+      <div>
+        <div className="jumbotron" style={{minHeight: "100vh", backgroundImage: "url('candlestick-chart.jpg')", margin: 0}}>
+          <div className="container">
+            <div className="row">
+              <div className="col-xs-6">
+                <div className="text-on-image text-center">
+                  <h1>CryptoWick</h1>
+                  <h2 style={{margin: "1em 0"}}>Programmable SMS notifications for cryptocurrency investors</h2>
+                  <p>Stay updated with cryptocurrency price trends as they happen, without having to live behind your computer screen.</p>
+                </div>
+              </div>
+
+              <div className="col-xs-6">
+                <div className="panel panel-default">
+                  <div className="panel-body">
+                    <LogInForm />
+                  </div>
+                </div>
+
+                <div className="panel panel-default">
+                  <div className="panel-body">
+                    <h2>New to CryptoWick? Sign Up</h2>
+                    <SignUpForm />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
+class LogInForm extends React.Component<{}, {}> {
+  render() {
+    return (
+      <form>
+        <div className="form-group">
+          <label>Email</label>
+          <input type="email" className="form-control" placeholder="Email" />
+        </div>
+        <div className="form-group">
+          <label>Password</label>
+          <input type="password" className="form-control" placeholder="Password" />
+        </div>
+        <button className="btn btn-success">Log In</button>
+        <a>Forgot Password?</a>
+      </form>
+    );
+  }
+}
+
+class SignUpForm extends React.Component<{}, {}> {
+  render() {
+    return (
+      <form>
+        <div className="form-group">
+          <label>Email</label>
+          <input type="email" className="form-control" placeholder="Email" />
+        </div>
+        <div className="form-group">
+          <label>Phone Number</label>
+          <input type="tel" className="form-control" placeholder="Phone Number" />
+        </div>
+        <div className="form-group">
+          <label>Password</label>
+          <input type="password" className="form-control" placeholder="Password" />
+        </div>
+        <div className="form-group">
+          <label>Confirm Password</label>
+          <input type="password" className="form-control" placeholder="Confirm Password" />
+        </div>
+        <button className="btn btn-success">Sign Up</button>
+      </form>
+    );
+  }
+}
+
+interface AlgoScreenState {
   btcBuyUsdAmount: string;
   btcSellCurrencyAmount: string;
 
@@ -713,7 +796,7 @@ interface AppState {
   showSettings: boolean;
 }
 
-class App extends React.Component<{}, AppState> {
+class AlgoScreen extends React.Component<{}, AlgoScreenState> {
   entryPointOpenTimes = new Array<number>();
   exitPointOpenTimes = new Array<number>();
   
@@ -1160,6 +1243,21 @@ class App extends React.Component<{}, AppState> {
             <button onClick={onToggleSettingsClicked}>Hide Settings</button>
           </div>
         ) : <button onClick={onToggleSettingsClicked}>Show Settings</button>}
+      </div>
+    );
+  }
+}
+
+class App extends React.Component<{}, {}> {
+  render() {
+    return (
+      <div className="App">
+        <nav>
+          <Link to="/">Landing Page</Link>
+          <Link to="/algorithm">Algorithm</Link>
+        </nav>
+        <Route exact path="/" component={LandingPage} />
+        <Route path="/algorithm" component={AlgoScreen} />
       </div>
     );
   }
