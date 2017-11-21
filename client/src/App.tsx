@@ -457,6 +457,14 @@ var customLineCharts = [
 
 let refreshCandlesticksIntervalHandle: number;
 
+let history: any = null;
+function changeRoute(route: string) {
+  if(!history) {
+    console.log("null history");
+  }
+
+  history.push(route);
+}
 class State {
   btcTradeAnalysis: TradeAnalysis | null;
   btcTradingAlgoState: TradingAlgorithmState;
@@ -738,14 +746,22 @@ class LandingPage extends React.Component<{}, {}> {
   }
 }
 
+class ConfirmationEmailSentPage extends React.Component<{}, {}> {
+  render() {
+    return (
+      <div>
+        <p>A confirmation email has been sent to your email address.</p>
+      </div>
+    );
+  }
+}
+
 class LogInForm extends React.Component<{}, {}> {
   onLogInClicked(event: any) {
-    console.log("Log In");
-    event.preventDefault();
+    changeRoute("/account");
   }
   onForgotPasswordClicked(event: any) {
-    console.log("Forgot Password");
-    event.preventDefault();
+    changeRoute("/reset-password");
   }
 
   render() {
@@ -769,10 +785,15 @@ class LogInForm extends React.Component<{}, {}> {
   }
 }
 
+class LogInPage extends React.Component<{}, {}>  {
+  render() {
+    return <LogInForm />
+  }
+}
+
 class SignUpForm extends React.Component<{}, {}> {
   onSignUpClicked(event: any) {
-    console.log("Sign Up");
-    event.preventDefault();
+    changeRoute("/confirmation-email-sent");
   }
 
   render() {
@@ -795,6 +816,35 @@ class SignUpForm extends React.Component<{}, {}> {
         
         <button onClick={onSignUpClicked} className="btn btn-success">Sign Up</button>
       </form>
+    );
+  }
+}
+
+class ResetPasswordScreen extends React.Component<{}, {}> {
+  onResetPasswordClicked() {
+    changeRoute("/reset-password-email-sent");
+  }
+  render() {
+    const onResetPasswordClicked = this.onResetPasswordClicked.bind(this);
+
+    return (
+      <form>
+        <div className="form-group">
+          <input type="email" className="form-control" placeholder="Email" />
+        </div>
+        
+        <button onClick={onResetPasswordClicked} className="btn btn-success">Reset Password</button>
+      </form>
+    );
+  }
+}
+
+class PasswordResetEmailSentScreen extends React.Component<{}, {}> {
+  render() {
+    return (
+      <div>
+        <p>You have been sent an email with instructions to reset your password.</p>
+      </div>
     );
   }
 }
@@ -1264,16 +1314,74 @@ class AlgoScreen extends React.Component<{}, AlgoScreenState> {
   }
 }
 
+class NavBar extends React.Component<{}, {}> {
+  render() {
+    return (
+      <nav>
+        <Link to="/">Landing Page</Link>
+        <Link to="/login">Login</Link>
+        <Link to="/account">Account</Link>
+        <Link to="/confirmation-email-sent">Confirmation Email Sent</Link>
+        <Link to="/algorithm">Algorithm</Link>
+      </nav>
+    );
+  }
+}
+
+class AccountPage extends React.Component<{}, {}> {
+  render() {
+    return (
+      <div className="form-horizontal">
+        <div className="form-group">
+          <label className="col-sm-2 control-label">Email</label>
+          <div className="col-sm-10">
+            first.last@gmail.com
+            <a>Edit</a>
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="col-sm-2 control-label">Phone Number</label>
+          <div className="col-sm-10">
+            +1 123-123-1234
+            <a>Edit</a>
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="col-sm-2 control-label">Password</label>
+          <div className="col-sm-10">
+            <a>Change Password</a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
+class RedirectComponent extends React.Component<{}, {}> {
+  componentDidMount() {
+    history = this.props["history"];
+  }
+  render() {
+    return (
+      <div></div>
+    );
+  }
+}
+
 class App extends React.Component<{}, {}> {
   render() {
     return (
       <div className="App">
-        <nav>
-          <Link to="/">Landing Page</Link>
-          <Link to="/algorithm">Algorithm</Link>
-        </nav>
+        <NavBar />
         <Route exact path="/" component={LandingPage} />
+        <Route path="/login" component={LogInPage} />
+        <Route path="/account" component={AccountPage} />
+        <Route path="/confirmation-email-sent" component={ConfirmationEmailSentPage} />
+        <Route path="/reset-password" component={ResetPasswordScreen} />
+        <Route path="/reset-password-email-sent" component={PasswordResetEmailSentScreen} />
         <Route path="/algorithm" component={AlgoScreen} />
+
+        <Route render={(props) => <RedirectComponent {...props} />} />
       </div>
     );
   }
