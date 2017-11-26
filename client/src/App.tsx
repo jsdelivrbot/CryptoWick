@@ -438,7 +438,8 @@ class CustomChart {
   constructor(public title: string, public ast: Ast.AstNode, public height: number) {}
 }
 
-const linRegLengths = [3, 5, 10, 15, 20, 30, 40, 50, 75, 100];
+const linRegLengths = [3];
+//const linRegLengths = [3, 5, 10, 15, 20, 30, 40, 50, 75, 100];
 
 var customLineCharts = [
   new CustomChart("Close", Utils.unwrapMaybe(Parser.parse("close")), 100),
@@ -506,9 +507,29 @@ state.ethTradingAlgoState = new TradingAlgorithmState();
 state.settings = new Settings("", "", "", "", "", "");
 state.useFakeHistoricalTrades = true;
 
+let tradeEvents = new Array<TradeEvent>();
+
+enum TradeEventType {
+  ENTRY,
+  EXIT
+}
+class TradeEvent {
+  constructor(public securitySymbol: string, public type: TradeEventType, public amountOfSecurity: number, public time: number) {}
+}
+
 let rerender = () => {};
-let onEnterTrade = (candlestickIndex: number) => {};
-let onExitTrade = (candlestickIndex: number) => {};
+let onEnterTrade = (tradeAnalysis: TradeAnalysis, candlestickIndex: number) => {
+  tradeEvents.push(new TradeEvent(
+    tradeAnalysis.securitySymbol, TradeEventType.ENTRY, 0, tradeAnalysis.openTimes[candlestickIndex]
+  ));
+  rerender();
+};
+let onExitTrade = (tradeAnalysis: TradeAnalysis, candlestickIndex: number) => {
+  tradeEvents.push(new TradeEvent(
+    tradeAnalysis.securitySymbol, TradeEventType.EXIT, 0, tradeAnalysis.openTimes[candlestickIndex]
+  ));
+  rerender();
+};
 
 function initialize() {
   const settings = loadSettings();
@@ -540,11 +561,11 @@ function reloadGeminiBalances() {
       state.btcBalance = json.BTC;
       state.ethBalance = json.ETH;
       
-      if(state.btcBalance > 0.001) {
+      if(!state.useFakeHistoricalTrades && (state.btcBalance > 0.001)) {
         state.btcTradingAlgoState.isInTrade = true;
       }
 
-      if(state.ethBalance > 0.01) {
+      if(!state.useFakeHistoricalTrades && (state.ethBalance > 0.01)) {
         state.ethTradingAlgoState.isInTrade = true;
       }
 
@@ -552,41 +573,25 @@ function reloadGeminiBalances() {
     })
     .catch(err => {});
 }
-function updateTradingAlgoWithNewTradeAnalysis(tradeAnalysis: TradeAnalysis, tradingAlgoState: TradingAlgorithmState) {
+function updateTradingAlgoWithNewTradeAnalysis(tradeAnalysis: TradeAnalysis, lastOpenTime: number | null, tradingAlgoState: TradingAlgorithmState) {
   if(!tradeAnalysis) { return; }
 
-  const lastOpenTime = tradeAnalysis
-  ? tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1]
-  : null;
   const mostRecentOpenTime = tradeAnalysis.openTimes[tradeAnalysis.candlestickCount - 1];
   const isNewAnalysis = !lastOpenTime || (mostRecentOpenTime > lastOpenTime);
 
   if (isNewAnalysis) {
-    if(lastOpenTime === null) {
-      if(state.useFakeHistoricalTrades) {
-        const fakeBuyCurrency = () => Promise.resolve(true);
-        const fakeSellCurrency = () => Promise.resolve(true);
+    const fakeTryBuyCurrency = () => Promise.resolve(true);
+    const fakeTrySellCurrency = () => Promise.resolve(true);
 
-        for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
-          const wasInTrade = tradingAlgoState.isInTrade;
-          updateTradingAlgorithm(tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency)
-            .then(() => {
-              if(!wasInTrade && tradingAlgoState.isInTrade) { onEnterTrade(i); }
-              if(wasInTrade && !tradingAlgoState.isInTrade) { onExitTrade(i); }
-            });
-        }
-      }
-    }
-
-    const tryBuyCurrency = () => {
+    const realTryBuyCurrency = (() => {
       return buyCurrency(tradeAnalysis.securitySymbol, Math.min(ALGORITHM_USD_TO_BUY, state.usdBalance))
         .then(() => Promise.resolve(true))
         .catch(() => {
           console.log("Failed buying.");
           return Promise.resolve(false);
         });
-    };
-    const trySellCurrency = () => {
+    });
+    const realTrySellCurrency = () => {
       return sellCurrency(tradeAnalysis.securitySymbol, getBalance(state, tradeAnalysis.securitySymbol) * 0.99)
         .then(() => Promise.resolve(true))
         .catch(() => {
@@ -595,59 +600,97 @@ function updateTradingAlgoWithNewTradeAnalysis(tradeAnalysis: TradeAnalysis, tra
         });
     };
 
-    const wasInTrade = tradingAlgoState.isInTrade;
-    updateTradingAlgorithm(tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency)
+    const tryBuyCurrency = !state.useFakeHistoricalTrades ? realTryBuyCurrency : fakeTryBuyCurrency;
+    const trySellCurrency = !state.useFakeHistoricalTrades ? realTrySellCurrency : fakeTrySellCurrency;
+
+    let promiseChain = Promise.resolve();
+
+    if(lastOpenTime === null) {
+      if(state.useFakeHistoricalTrades) {
+        const fakeBuyCurrency = () => Promise.resolve(true);
+        const fakeSellCurrency = () => Promise.resolve(true);
+
+        let initFakeHistoricalTradesPromise = Promise.resolve();
+
+        for(let i = 0; i < (tradeAnalysis.candlestickCount - 1); i++) {
+          initFakeHistoricalTradesPromise = initFakeHistoricalTradesPromise
+          .then(() => {
+            const wasInTrade = tradingAlgoState.isInTrade;
+
+            return updateTradingAlgorithm(tradingAlgoState, tradeAnalysis, i, fakeBuyCurrency, fakeSellCurrency)
+              .then(() => {
+                if(!wasInTrade && tradingAlgoState.isInTrade) { onEnterTrade(tradeAnalysis, i); }
+                if(wasInTrade && !tradingAlgoState.isInTrade) { onExitTrade(tradeAnalysis, i); }
+              });
+          });
+        }
+
+        promiseChain = promiseChain.then(() => { return initFakeHistoricalTradesPromise; });
+      }
+    }
+
+    promiseChain = promiseChain
       .then(() => {
-        if(!wasInTrade && tradingAlgoState.isInTrade) {
-          onEnterTrade(tradeAnalysis.candlestickCount - 1);
-
-          Sms.sendTextWithTwilio(
-            state.settings.twilioAccountSid,
-            state.settings.twilioAuthToken,
-            state.settings.fromPhoneNumber,
-            state.settings.toPhoneNumber,
-            "Bought"
+        const wasInTrade = tradingAlgoState.isInTrade;
+        updateTradingAlgorithm(tradingAlgoState, tradeAnalysis, tradeAnalysis.candlestickCount - 1, tryBuyCurrency, trySellCurrency)
+          .then(() => {
+            if(!wasInTrade && tradingAlgoState.isInTrade) {
+              onEnterTrade(tradeAnalysis, tradeAnalysis.candlestickCount - 1);
+    
+              Sms.sendTextWithTwilio(
+                state.settings.twilioAccountSid,
+                state.settings.twilioAuthToken,
+                state.settings.fromPhoneNumber,
+                state.settings.toPhoneNumber,
+                "Bought"
+              );
+            }
+            if(wasInTrade && !tradingAlgoState.isInTrade) {
+              onExitTrade(tradeAnalysis, tradeAnalysis.candlestickCount - 1);
+    
+              Sms.sendTextWithTwilio(
+                state.settings.twilioAccountSid,
+                state.settings.twilioAuthToken,
+                state.settings.fromPhoneNumber,
+                state.settings.toPhoneNumber,
+                "Sold"
+              );
+            }
+    
+            rerender();
+          });
+    
+        /*if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
+          SMS.sendTextWithTwilio(
+            this.state.twilioAccountSid,
+            this.state.twilioAuthToken,
+            this.state.fromPhoneNumber,
+            this.state.toPhoneNumber,
+            "Abnormal volume."
           );
-        }
-        if(wasInTrade && !tradingAlgoState.isInTrade) {
-          onExitTrade(tradeAnalysis.candlestickCount - 1);
-
-          Sms.sendTextWithTwilio(
-            state.settings.twilioAccountSid,
-            state.settings.twilioAuthToken,
-            state.settings.fromPhoneNumber,
-            state.settings.toPhoneNumber,
-            "Sold"
-          );
-        }
-
-        rerender();
+        }*/
       });
-
-    /*if(tradeAnalysis.isVolumeAbnormal[tradeAnalysis.candlestickCount - 1]) {
-      SMS.sendTextWithTwilio(
-        this.state.twilioAccountSid,
-        this.state.twilioAuthToken,
-        this.state.fromPhoneNumber,
-        this.state.toPhoneNumber,
-        "Abnormal volume."
-      );
-    }*/
   }
 }
 function reloadCandlesticks() {
   const btcLoadingPromise = CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_MINUTES)
     .then(tradeAnalysis => {
+      const lastOpenTime = state.btcTradeAnalysis
+        ? state.btcTradeAnalysis.openTimes[state.btcTradeAnalysis.candlestickCount - 1]
+        : null;
       state.btcTradeAnalysis = tradeAnalysis;
-      updateTradingAlgoWithNewTradeAnalysis(state.btcTradeAnalysis, state.btcTradingAlgoState);
+      updateTradingAlgoWithNewTradeAnalysis(state.btcTradeAnalysis, lastOpenTime, state.btcTradingAlgoState);
       rerender();
     });
   
   window.setTimeout(() => {
     const ethLoadingPromise =CryptoCompare.loadAggregate1MinCandlesticks("ETH", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_MINUTES)
     .then(tradeAnalysis => {
+      const lastOpenTime = state.ethTradeAnalysis
+      ? state.ethTradeAnalysis.openTimes[state.ethTradeAnalysis.candlestickCount - 1]
+      : null;
       state.ethTradeAnalysis = tradeAnalysis;
-      updateTradingAlgoWithNewTradeAnalysis(state.ethTradeAnalysis, state.ethTradingAlgoState);
+      updateTradingAlgoWithNewTradeAnalysis(state.ethTradeAnalysis, lastOpenTime, state.ethTradingAlgoState);
       rerender();
     });
   }, 5000);
@@ -863,9 +906,6 @@ interface AlgoScreenState {
 }
 
 class AlgoScreen extends React.Component<{}, AlgoScreenState> {
-  entryPointOpenTimes = new Array<number>();
-  exitPointOpenTimes = new Array<number>();
-  
   keyDownEventHandler: (event: KeyboardEvent) => void;
 
   constructor() {
@@ -978,15 +1018,7 @@ class AlgoScreen extends React.Component<{}, AlgoScreenState> {
 
   componentDidMount() {
     rerender = () => { this.forceUpdate(); };
-    onEnterTrade = (candlestickIndex: number) => {
-      this.entryPointOpenTimes.push(candlestickIndex);
-      this.forceUpdate();
-    };
-    onExitTrade = (candlestickIndex: number) => {
-      this.exitPointOpenTimes.push(candlestickIndex);
-      this.forceUpdate();
-    };
-
+    
     this.keyDownEventHandler = this.onKeyDown.bind(this);
     window.addEventListener("keydown", this.keyDownEventHandler);
   }
@@ -1013,12 +1045,20 @@ class AlgoScreen extends React.Component<{}, AlgoScreenState> {
 
     let areEntryPoints = new Array<boolean>(tradeAnalysis.candlestickCount);
     for(let i = 0; i < tradeAnalysis.candlestickCount; i++) {
-      areEntryPoints[i] = this.entryPointOpenTimes.indexOf(tradeAnalysis.openTimes[i]) >= 0;
+      areEntryPoints[i] = tradeEvents.findIndex(event =>
+        (event.securitySymbol === tradeAnalysis.securitySymbol) &&
+        (event.type === TradeEventType.ENTRY) &&
+        (event.time === tradeAnalysis.openTimes[i])
+      ) >= 0;
     }
 
     let areExitPoints = new Array<boolean>(tradeAnalysis.candlestickCount);
     for(let i = 0; i < tradeAnalysis.candlestickCount; i++) {
-      areExitPoints[i] = this.exitPointOpenTimes.indexOf(tradeAnalysis.openTimes[i]) >= 0;
+      areExitPoints[i] = tradeEvents.findIndex(event =>
+        (event.securitySymbol === tradeAnalysis.securitySymbol) &&
+        (event.type === TradeEventType.EXIT) &&
+        (event.time === tradeAnalysis.openTimes[i])
+      ) >= 0;
     }
 
     const candlestickColors = tradeAnalysis

@@ -108,6 +108,10 @@ export function updateTradingAlgorithm(
     return isBearishMinus2 && isBullishMinus1 && isGreenNonHeikin && isBullishEnough;
   };
 
+  const shouldEnterAlways = () => {
+    return true;
+  };
+
   const shouldExitStopLoss = () => {
     return curPrice <= state.stopLossPrice;
   };
