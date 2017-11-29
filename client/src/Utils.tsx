@@ -202,4 +202,4 @@ export function xToColumnIndex(chartWidth: number, columnWidth: number, columnCo
   return (columnCount - 1) + scrolledIFromRight;
 }
 
-export const COLUMN_HIGHLIGHT_FILL_STYLE = "rgba(0, 0, 0, 0.2)";
+export const COLUMN_HIGHLIGHT_FILL_STYLE = "rgba(0, 0, 0, 0.1)";

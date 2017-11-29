@@ -90,8 +90,8 @@ export class TradeAnalysis {
       this.sma50Derivative1st = Maths.movingDerivative(this.sma50, 1);
       this.sma50Derivative2nd = Maths.movingSecondDerivative(this.sma50, 1);
 
-      this.stochasticClose = Maths.stochasticOscillator(this.closes, linRegLookbackLength);
-      this.stochasticVolume = Maths.stochasticOscillator(this.volumes, linRegLookbackLength);
+      this.stochasticClose = Maths.laggingStochasticOscillator(this.closes, linRegLookbackLength);
+      this.stochasticVolume = Maths.laggingStochasticOscillator(this.volumes, linRegLookbackLength);
 
       this.isVolumeAbnormal = Maths.laggingReduce(this.volumes, linRegLookbackLength, (values, startIndex, count) => {
         if(count < linRegLookbackLength) { return false; }

@@ -200,6 +200,12 @@ export function laggingReduce<T>(
 export function laggingSimpleMovingAverage(values: number[], lookbacklength: number): number[] {
   return laggingReduce(values, lookbacklength, meanArraySlice);
 }
+export function laggingMin(values: number[], lookbacklength: number): number[] {
+  return laggingReduce(values, lookbacklength, min);
+}
+export function laggingMax(values: number[], lookbacklength: number): number[] {
+  return laggingReduce(values, lookbacklength, max);
+}
 export function laggingExponentialMovingAverage(values: number[], lookbacklength: number): number[] {
   Debug.assert(values !== null);
   Debug.assert(lookbacklength > 0);
@@ -218,7 +224,7 @@ export function laggingExponentialMovingAverage(values: number[], lookbacklength
   return ema;
 }
 
-export function stochasticOscillator(values: number[], lookbacklength: number): number[] {
+export function laggingStochasticOscillator(values: number[], lookbacklength: number): number[] {
   return laggingReduce(values, lookbacklength, (values, startIndex, count) => {
   const endIndexExclusive = startIndex + count;
   const curVal = values[endIndexExclusive - 1];

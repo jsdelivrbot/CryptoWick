@@ -1,3 +1,11 @@
+/*
+-volume spikes
+-parabolic sar above or below (or alternating if ranged)
+-bollinger band upper/lower slopes
+-bollinger band width
+-replace bollinger bands with keltner channels?
+*/
+
 import * as React from "react";
 import { Route, Link } from "react-router-dom";
 
@@ -413,7 +421,7 @@ const REFRESH_INTERVAL_IN_SECONDS = 30;
 
 const CHART_WIDTH = 600;
 
-const CANDLESTICK_INTERVAL_IN_MINUTES = 15;
+const CANDLESTICK_INTERVAL_IN_HOURS = 1;
 
 const closeSma16AstNode = (
   new Ast.FunctionCall(
@@ -435,18 +443,56 @@ const closeSma50AstNode = (
 );
 
 class CustomChart {
-  constructor(public title: string, public ast: Ast.AstNode, public height: number) {}
+  constructor(public title: string, public getValues: (ta: TradeAnalysis) => number[], public height: number) {}
 }
 
-const linRegLengths = [3];
-//const linRegLengths = [3, 5, 10, 15, 20, 30, 40, 50, 75, 100];
+const linRegLengths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 50];
+const TREND_ANALYSIS_LENGTH = 10;
 
 var customLineCharts = [
-  new CustomChart("Close", Utils.unwrapMaybe(Parser.parse("close")), 100),
+  new CustomChart(
+    "Close",
+    ta => Ast.evaluate(Utils.unwrapMaybe(Parser.parse("close")), ta),
+    100
+  ),
+  new CustomChart(
+    "Diff From Lin. Reg.",
+    ta => {
+      const closeTrendSlopes = Ast.evaluate(Utils.unwrapMaybe(Parser.parse(`linRegSlope(${TREND_ANALYSIS_LENGTH}, close)`)), ta);
+      const closeDiffsFromLinReg  = ta.closes.map((close, index, closes) => {
+        const indexAtStartOfPrevTrend = (index - 1) - (TREND_ANALYSIS_LENGTH - 1);
+        if(indexAtStartOfPrevTrend < 0) return 0;
+        
+        const prevTrendSlope = closeTrendSlopes[index - 1];
+        const predictedClose = closes[indexAtStartOfPrevTrend] + (TREND_ANALYSIS_LENGTH * prevTrendSlope);
+
+        return closes[index] - predictedClose;
+      });
+
+      return closeDiffsFromLinReg;
+      //return Maths.laggingSimpleMovingAverage(closeDiffsFromLinReg, 3);
+    },
+    100
+  ),
+  new CustomChart(
+    "Trend Slope",
+    ta => Ast.evaluate(Utils.unwrapMaybe(Parser.parse(`linRegSlope(${TREND_ANALYSIS_LENGTH}, close)`)), ta),
+    100
+  ),
+  new CustomChart(
+    "asdf",
+    ta => {
+      const closeAbsDeltas = ta.closes.map((close, index, closes) => (index > 0) ? Math.abs(closes[index] - closes[index - 1]) : 0);
+      const smaCloseAbsDeltas = Maths.laggingSimpleMovingAverage(closeAbsDeltas, TREND_ANALYSIS_LENGTH);
+
+      return ArrayUtils.combineArrays(closeAbsDeltas, smaCloseAbsDeltas, (a, b) => (b !== 0) ? (a / b) : 0);
+    },
+    100
+  ),
   ...linRegLengths.map(l =>
     new CustomChart(
       `Lin. Reg. Close Slope ${l}`,
-      Utils.unwrapMaybe(Parser.parse(`linRegSlope(${l}, close)`)),
+      ta => Ast.evaluate(Utils.unwrapMaybe(Parser.parse(`linRegSlope(${l}, close)`)), ta),
       100
     )
   ),
@@ -673,7 +719,7 @@ function updateTradingAlgoWithNewTradeAnalysis(tradeAnalysis: TradeAnalysis, las
   }
 }
 function reloadCandlesticks() {
-  const btcLoadingPromise = CryptoCompare.loadAggregate1MinCandlesticks("BTC", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_MINUTES)
+  const btcLoadingPromise = CryptoCompare.loadAggregate1HourCandlesticks("BTC", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_HOURS)
     .then(tradeAnalysis => {
       const lastOpenTime = state.btcTradeAnalysis
         ? state.btcTradeAnalysis.openTimes[state.btcTradeAnalysis.candlestickCount - 1]
@@ -684,7 +730,7 @@ function reloadCandlesticks() {
     });
   
   window.setTimeout(() => {
-    const ethLoadingPromise =CryptoCompare.loadAggregate1MinCandlesticks("ETH", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_MINUTES)
+    const ethLoadingPromise = CryptoCompare.loadAggregate1HourCandlesticks("ETH", "USD", "Gemini", CANDLESTICK_INTERVAL_IN_HOURS)
     .then(tradeAnalysis => {
       const lastOpenTime = state.ethTradeAnalysis
       ? state.ethTradeAnalysis.openTimes[state.ethTradeAnalysis.candlestickCount - 1]
@@ -1206,7 +1252,7 @@ class AlgoScreen extends React.Component<{}, AlgoScreenState> {
         {customLineCharts.map(chart => (
           <LineChart
             chartTitle={chart.title}
-            values={Ast.evaluate(chart.ast, tradeAnalysis)}
+            values={chart.getValues(tradeAnalysis)}
             width={CHART_WIDTH}
             height={chart.height}
             columnWidth={columnWidth}

@@ -67,51 +67,18 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
 
     return i;
   }
-  priceToY(price: number): number {
-    const priceRange = this.maxPrice - this.minPrice;
-    const yPercentFromBottom = (price - this.minPrice) / priceRange;
-    const yFromBottom = yPercentFromBottom * this.props.height;
-    const yFromTop = this.props.height - yFromBottom;
-    return yFromTop;
-  }
-  drawCandlestick(iFromRight: number) {
-    if(!this.props.tradeAnalysis || !this.context2d) { return; }
-    
-    const i = this.iFromRightToI(iFromRight);
-    const columnX = Utils.iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight);
-
-    const open = this.props.opens[i];
-    const high = this.props.highs[i];
-    const low = this.props.lows[i];
-    const close = this.props.closes[i];
-
-    const maxVolume = Math.max(...this.props.volumes);
-    const a = 1;//this.props.volumes[i] / maxVolume;
-    const fillStyle = (close > open) ? `rgba(0, 128, 0, ${a})` : `rgba(255, 0, 0, ${a})`;
-
-    const bodyLeft = columnX + this.props.columnHorizontalPadding;
-    const bodyRight = (columnX + this.props.columnWidth) - this.props.columnHorizontalPadding;
-    const bodyWidth = bodyRight - bodyLeft;
-    const bodyMaxPrice = Math.max(open, close);
-    const bodyMinPrice = Math.min(open, close);
-    const bodyTop = this.priceToY(bodyMaxPrice);
-    const bodyBottom = this.priceToY(bodyMinPrice);
-    const bodyHeight = bodyBottom - bodyTop;
-
-    const wickLeft = columnX + (this.props.columnWidth / 2);
-    const wickTop = this.priceToY(high);
-    const wickBottom = this.priceToY(low);
-    const wickHeight = wickBottom - wickTop;
-
-    // body
-    Graphics.fillRect(this.context2d, new Maths.Vector2(bodyLeft, bodyTop), bodyWidth, bodyHeight, fillStyle);
-    
-    // wick
-    Graphics.fillRect(this.context2d, new Maths.Vector2(wickLeft, wickTop), 1, wickHeight, fillStyle);
-  }
   drawLinearRegressionLine(windowSize: number) {
     if (this.context2d === null) { return; }
     if (this.props.closes.length < windowSize) { return; }
+
+    const chartAreaMetrics = new Graphics.ColumnChartAreaMetrics(
+      this.props.width,
+      this.props.height,
+      this.minPrice,
+      this.maxPrice,
+      this.props.columnWidth,
+      this.props.columnHorizontalPadding
+    );
 
     const linRegPoints = ArrayUtils.generateArray(windowSize, iFromStart => {
       const i = (this.props.closes.length - windowSize) + iFromStart;
@@ -122,13 +89,13 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
     const lineStartClose = this.props.closes[this.props.closes.length - windowSize];
     const lineStartPoint = new Maths.Vector2(
       Utils.iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, windowSize - 1) + (this.props.columnWidth / 2),
-      this.priceToY(lineOfBestFit.b)
+      Graphics.valueToY(chartAreaMetrics, lineOfBestFit.b)
     );
     const lineEndPoint = new Maths.Vector2(
       Utils.iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, 0) + (this.props.columnWidth / 2),
-      this.priceToY((lineOfBestFit.m * (windowSize - 1)) + lineOfBestFit.b)
+      Graphics.valueToY(chartAreaMetrics, (lineOfBestFit.m * (windowSize - 1)) + lineOfBestFit.b)
     );
-    Graphics.strokeLine(this.context2d, lineStartPoint, lineEndPoint, "rgba(0, 0, 0, 0.3)");
+    Graphics.strokeLine(this.context2d, lineStartPoint, lineEndPoint, "rgba(255, 255, 255, 0.3)");
   }
   drawMarker(marker: CandlestickMarker, columnX: number, topY: number) {
     if ((this.context2d === null)) { return; }
@@ -191,6 +158,8 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
 
     this.context2d.clearRect(0, 0, this.props.width, this.props.height);
 
+    Graphics.fillRect(this.context2d, new Maths.Vector2(0, 0), this.props.width, this.props.height, "rgb(64, 64, 64)");
+
     if (this.props.tradeAnalysis) {
       // draw highlighted column
       if (this.props.highlightedColumnIndex !== undefined) {
@@ -200,10 +169,25 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
         Graphics.fillRect(this.context2d, position, this.props.columnWidth, this.props.height, fillStyle);
       }
 
+      const chartAreaMetrics = new Graphics.ColumnChartAreaMetrics(
+        this.props.width,
+        this.props.height,
+        this.minPrice,
+        this.maxPrice,
+        this.props.columnWidth,
+        this.props.columnHorizontalPadding
+      );
+
       // draw candlesticks
-      for (let iFromRight = 0; iFromRight < this.props.tradeAnalysis.candlestickCount; iFromRight++) {
-        this.drawCandlestick(iFromRight);
-      }
+      Graphics.drawCandlesticks(
+        this.context2d,
+        chartAreaMetrics,
+        this.props.scrollOffsetInColumns,
+        this.props.tradeAnalysis.opens,
+        this.props.tradeAnalysis.highs,
+        this.props.tradeAnalysis.lows,
+        this.props.tradeAnalysis.closes
+      );
 
       // markers
       if(this.props.markers) {
@@ -215,11 +199,11 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
           const markerHeight = markerWidth;
   
           const high = this.props.highs[i];
-          const wickTop = this.priceToY(high);
+          const wickTop = Graphics.valueToY(chartAreaMetrics, high);
   
           // Draw markers below.
           const low = this.props.lows[i];
-          const wickBottom = this.priceToY(low);
+          const wickBottom = Graphics.valueToY(chartAreaMetrics, low);
 
           let topY = wickBottom + MARKER_VERTICAL_MARGIN;
           this.props.markers[i].forEach(marker => {
@@ -244,21 +228,25 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
       // lines
       if(this.props.lines) {
         this.props.lines.forEach(prices => {
-          const candlestickCount = prices.length;
-          const points = prices.map((value, index) => {
-            const iFromRight = (candlestickCount - 1) - index;
-    
-            return new Maths.Vector2(
-              Utils.iFromRightToColumnX(this.props.width, this.props.columnWidth, this.props.scrollOffsetInColumns, iFromRight) + (this.props.columnWidth / 2),
-              this.priceToY(value)
-            );
-          });
+          if(!this.context2d) return;
 
-          if (this.context2d) {
-            Graphics.strokePolyline(this.context2d, points, "black");
-          }
+          Graphics.fillPolylineOnChart(
+            this.context2d, chartAreaMetrics, this.props.scrollOffsetInColumns, prices, "rgb(0, 0, 0)"
+          );
         });
       }
+
+      // ichimoku cloud
+      const ichimokuCloud = Graphics.calcIchimokuCloud(
+        this.props.tradeAnalysis.highs, this.props.tradeAnalysis.lows, this.props.tradeAnalysis.closes
+      );
+
+      Graphics.drawIchimokuCloud(
+        this.context2d,
+        chartAreaMetrics,
+        this.props.scrollOffsetInColumns,
+        ichimokuCloud
+      );
 
       // draw linear regression lines
       const linRegWindowSizes = [5, 10, 15, 20, 25, 30, 50];
@@ -266,7 +254,7 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
 
       // draw chart title
       const chartTitle = `${this.props.tradeAnalysis.securitySymbol} ${this.props.tradeAnalysis.exchangeName} ${this.props.tradeAnalysis.timeframe}`;
-      Graphics.fillText(this.context2d, chartTitle, new Maths.Vector2(10, 10), "rgb(0, 0, 0)");
+      Graphics.fillText(this.context2d, chartTitle, new Maths.Vector2(10, 10), "rgb(255, 255, 255)");
     }
   }
 
