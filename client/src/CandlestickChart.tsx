@@ -236,21 +236,9 @@ export class CandlestickChart extends React.Component<CandlestickChartProps, {}>
         });
       }
 
-      // ichimoku cloud
-      const ichimokuCloud = Graphics.calcIchimokuCloud(
-        this.props.tradeAnalysis.highs, this.props.tradeAnalysis.lows, this.props.tradeAnalysis.closes
-      );
-
-      Graphics.drawIchimokuCloud(
-        this.context2d,
-        chartAreaMetrics,
-        this.props.scrollOffsetInColumns,
-        ichimokuCloud
-      );
-
       // draw linear regression lines
-      const linRegWindowSizes = [5, 10, 15, 20, 25, 30, 50];
-      linRegWindowSizes.forEach(x => this.drawLinearRegressionLine(x));
+      //const linRegWindowSizes = [5, 10, 15, 20, 25, 30, 50];
+      //linRegWindowSizes.forEach(x => this.drawLinearRegressionLine(x));
 
       // draw chart title
       const chartTitle = `${this.props.tradeAnalysis.securitySymbol} ${this.props.tradeAnalysis.exchangeName} ${this.props.tradeAnalysis.timeframe}`;

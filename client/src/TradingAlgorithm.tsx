@@ -1,4 +1,6 @@
 import * as Utils from "./Utils";
+import * as ArrayUtils from "./ArrayUtils";
+import * as Maths from "./Maths";
 import { TradeAnalysis } from "./TradeAnalysis";
 
 export const ALGORITHM_USD_TO_BUY = 2000;

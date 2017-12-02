@@ -202,4 +202,35 @@ export function xToColumnIndex(chartWidth: number, columnWidth: number, columnCo
   return (columnCount - 1) + scrolledIFromRight;
 }
 
+export function lineCrosses(values1: number[], values2: number[]): boolean[] {
+  return ArrayUtils.combineArrays(values1, values2, (v1, v2, i) => {
+    if(i === 0) return false;
+
+    const prevDiff = values1[i - 1] - values2[i - 1];
+    const curDiff = v1 - v2;
+
+    return ((prevDiff <= 0) && (curDiff > 0)) || ((prevDiff >= 0) && (curDiff < 0));
+  });
+}
+export function lineCrossesOver(values1: number[], values2: number[]): boolean[] {
+  return ArrayUtils.combineArrays(values1, values2, (v1, v2, i) => {
+    if(i === 0) return false;
+
+    const prevDiff = values1[i - 1] - values2[i - 1];
+    const curDiff = v1 - v2;
+
+    return (prevDiff <= 0) && (curDiff > 0);
+  });
+}
+export function lineCrossesUnder(values1: number[], values2: number[]): boolean[] {
+  return ArrayUtils.combineArrays(values1, values2, (v1, v2, i) => {
+    if(i === 0) return false;
+
+    const prevDiff = values1[i - 1] - values2[i - 1];
+    const curDiff = v1 - v2;
+
+    return (prevDiff >= 0) && (curDiff < 0);
+  });
+}
+
 export const COLUMN_HIGHLIGHT_FILL_STYLE = "rgba(0, 0, 0, 0.1)";

@@ -21,13 +21,13 @@ export function generateArray<T>(arrayLength: number, genElementFunc: (index: nu
 
   return array;
 }
-export function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1, e2: T2) => TR): TR[] {
+export function combineArrays<T1, T2, TR>(arr1: T1[], arr2: T2[], combineFunc: (e1: T1, e2: T2, i: number) => TR): TR[] {
   Debug.assert(arr1.length === arr2.length);
 
   let result = new Array<TR>(arr1.length);
 
   for(let i = 0; i < result.length; i++) {
-    result[i] = combineFunc(arr1[i], arr2[i]);
+    result[i] = combineFunc(arr1[i], arr2[i], i);
   }
 
   return result;

@@ -1,11 +1,3 @@
-/*
--volume spikes
--parabolic sar above or below (or alternating if ranged)
--bollinger band upper/lower slopes
--bollinger band width
--replace bollinger bands with keltner channels?
-*/
-
 import * as React from "react";
 import { Route, Link } from "react-router-dom";
 
@@ -449,8 +441,27 @@ class CustomChart {
 const linRegLengths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 50];
 const TREND_ANALYSIS_LENGTH = 10;
 
-var customLineCharts = [
+var customLineCharts: Array<CustomChart> = [
   new CustomChart(
+    "OBV",
+    ta => {
+      let obv = new Array<number>(ta.candlestickCount);
+      for(let i = 0; i < obv.length; i++) {
+        if(i > 0) {
+          const volumeSign = Math.sign(ta.closes[i] - ta.closes[i - 1]);
+          const signedVolume = volumeSign * ta.volumes[i];
+
+          obv[i] = obv[i - 1] + signedVolume;
+        } else {
+          obv[i] = 0;
+        }
+      }
+
+      return obv;
+    },
+    100
+  )
+  /*new CustomChart(
     "Close",
     ta => Ast.evaluate(Utils.unwrapMaybe(Parser.parse("close")), ta),
     100
@@ -495,7 +506,7 @@ var customLineCharts = [
       ta => Ast.evaluate(Utils.unwrapMaybe(Parser.parse(`linRegSlope(${l}, close)`)), ta),
       100
     )
-  ),
+  ),*/
   //new CustomChart("SMA 16 Close", Utils.unwrapMaybe(Parser.parse("sma(16, close)"))),
   //new CustomChart("Close - SMA 16 Close", Utils.unwrapMaybe(Parser.parse("sub(close, sma(16, close))"))),
   //new CustomChart("SMA 50 1st d/dt", Utils.unwrapMaybe(Parser.parse("ddt1st(sma(50, close))"))),
@@ -1177,7 +1188,6 @@ class AlgoScreen extends React.Component<{}, AlgoScreenState> {
     }
 
     let lines = new Array<Array<number>>();
-    lines.push(tradeAnalysis.sma50);
 
     const sma50Derivative2ndSma4 = Maths.laggingSimpleMovingAverage(tradeAnalysis.sma50Derivative2nd, 4);
     const closeSma16 = Maths.laggingSimpleMovingAverage(tradeAnalysis.closes, 16);
